@@ -1,15 +1,15 @@
 {
     "name": "bb-plugin-dashboard",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "license": "MIT",
     "author": "devalextelematika",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/devalextelematika/bbdesk.git"
+        "url": "git+https://github.com/devalextelematika/BBDesk.git"
     },
-    "homepage": "https://github.com/devalextelematika/bbdesk#readme",
+    "homepage": "https://github.com/devalextelematika/BBDesk#readme",
     "bugs": {
-        "url": "https://github.com/devalextelematika/bbdesk/issues"
+        "url": "https://github.com/devalextelematika/BBDesk/issues"
     },
     "type": "module",
     "engines": {
@@ -18,7 +18,7 @@
     },
     "bb": {
         "name": "BBDesk",
-        "description": "Проекты, чаты и приложения BB в одном рабочем пространстве.",
+        "description": "Your BB projects, chats and applications in one workspace.",
         "branding": {
             "icon": "./assets/icon.svg",
             "experimental_icons": { "mark": "./assets/icon.svg" },
@@ -68,6 +68,6 @@
         "build": "bb plugin build",
         "typecheck": "tsc --noEmit",
         "pretest": "node scripts/check-ui.mjs",
-        "test": "node --test --test-isolation=none state.test.ts ui.test.mjs"
+        "test": "node --test --test-isolation=none state.test.ts i18n.test.ts permission-memory.test.ts settings.test.mjs ui.test.mjs"
     }
 }

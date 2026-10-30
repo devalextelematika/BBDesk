@@ -1,64 +1,81 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { DragEvent, ReactNode } from "react";
 import {
   definePluginApp, useRpc, useRealtime, useRealtimeConnectionState, useSdk,
   experimental_useSidebarThreads as useThreads,
   experimental_SidebarNavigationIcon as NavigationIcon,
   useSidebarThreadDraftIds as useDraftIds,
   experimental_usePluginId as usePluginId,
-  experimental_NewThreadComposer as NewThreadComposer,
   ThreadChat,
 } from "@get-bb/plugin-sdk/app";
 import { Icon, type IconName } from "./components/ui/icon";
 import { ThreadIndicator } from "./components/thread-indicator";
 import { ProjectTabs } from "./project-tabs";
+import { ThreadTabs, type ThreadTab } from "./thread-tabs";
+import { readWorkspaceMemory, saveWorkspaceMemory } from "./workspace-memory";
+import { ConversationMetadata, ConversationResults, type ConversationItem } from "./conversation-list";
+import { useUndoExpiry } from "./undo-tab";
+import { usePanelFocus } from "./hooks/use-panel-focus";
 import { hasWork, isWorking, isSubagent, isFinishedSubagent, type Activity, type TrackedThread } from "./state";
 import { followChatBottom } from "./chat-scroll";
+import { preserveChatReading } from "./chat-reading";
+import { ChatFileSurface } from "./chat-file-surface";
 import { useLauncherPanel } from "./launcher-panel";
 import { LauncherNavigation, useLauncherNavigation } from "./launcher-navigation";
 import type { rpcContract, DashboardConfig } from "./server";
+import type { MessageKey, Translator } from "./i18n";
+import { useTranslation } from "./use-translation";
+import { RememberThreadPermission, RememberingNewThreadComposer as NewThreadComposer } from "./permission-composers";
 import "./styles.css";
 
 type Thread = ReturnType<typeof useThreads>["threads"][number];
 type Snapshot = { config: DashboardConfig; tracked: TrackedThread[]; syncError: string | null; syncedAt: number | null };
 const activity = (t: Thread): Activity => ({ ...t, backgroundAgents: t.activity.backgroundAgents, backgroundCommands: t.activity.backgroundCommands, workflows: t.activity.workflows });
 const needsAttention = (t: Thread) => t.hasPendingInteraction || t.status === "error" || t.queuedWork === "failed" || t.isUnread && !isWorking(activity(t));
-function statusOf(t: Thread) {
-  if (t.hasPendingInteraction) return { text: "Нужно действие", tone: "attention" };
-  if (t.queuedWork === "failed" || t.status === "error") return { text: "Ошибка", tone: "error" };
-  if (t.runtimeStatus === "waiting-for-host") return { text: "Ожидает подключения", tone: "waiting" };
-  if (t.runtimeStatus === "provisioning") return { text: "Подготовка окружения", tone: "running" };
-  if (t.status === "pending") return { text: "Ожидает запуска", tone: "waiting" };
-  if (t.status === "starting") return { text: "Запускается", tone: "running" };
-  if (t.status === "stopping") return { text: "Останавливается", tone: "running" };
-  if (isWorking(activity(t))) return { text: isSubagent(t) ? "Субагент работает" : "Работает", tone: "running" };
-  if (t.queuedWork === "waiting") return { text: "В очереди", tone: "waiting" };
-  if (t.isUnread) return { text: "Новый ответ", tone: "result" };
-  if (t.status !== "idle") return { text: "Неизвестное состояние", tone: "unknown" };
-  return { text: "Просмотрено", tone: "read" };
+const compareThreads = (a: Thread, b: Thread) => Number(needsAttention(b)) - Number(needsAttention(a)) || Number(isWorking(activity(b))) - Number(isWorking(activity(a))) || b.latestAttentionAt - a.latestAttentionAt || a.id.localeCompare(b.id);
+function statusOf(t: Thread, tr: Translator) {
+  if (t.hasPendingInteraction) return { text: tr("actionNeeded"), tone: "attention" };
+  if (t.queuedWork === "failed" || t.status === "error") return { text: tr("error"), tone: "error" };
+  if (t.runtimeStatus === "waiting-for-host") return { text: tr("waitingHost"), tone: "waiting" };
+  if (t.runtimeStatus === "provisioning") return { text: tr("provisioning"), tone: "running" };
+  if (t.status === "pending") return { text: tr("pending"), tone: "waiting" };
+  if (t.status === "starting") return { text: tr("starting"), tone: "running" };
+  if (t.status === "stopping") return { text: tr("stopping"), tone: "running" };
+  if (isWorking(activity(t))) return { text: isSubagent(t) ? tr("subagentWorking") : tr("working"), tone: "running" };
+  if (t.queuedWork === "waiting") return { text: tr("queued"), tone: "waiting" };
+  if (t.isUnread) return { text: tr("newReply"), tone: "result" };
+  if (t.status !== "idle") return { text: tr("unknownState"), tone: "unknown" };
+  return { text: tr("read"), tone: "read" };
 }
 function Empty({ children }: { children: ReactNode }) { return <div className="db-empty" role="status">{children}</div>; }
 function SmallButton({ label, icon, onClick, disabled = false }: { label: string; icon: IconName; onClick: () => void; disabled?: boolean }) {
   return <button type="button" className="db-icon-btn" title={label} aria-label={label} onClick={onClick} disabled={disabled}><Icon name={icon} className="db-icon"/></button>;
 }
-function ExpandedChat({ threadId }: { threadId: string }) {
+function ExpandedChat({ threadId, fillSpace = false }: { threadId: string; fillSpace?: boolean }) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (fillSpace && viewport.current) return preserveChatReading(viewport.current, threadId);
+  }, [threadId, fillSpace]);
   useEffect(() => {
-    if (!viewport.current || !content.current) return;
+    if (fillSpace || !viewport.current || !content.current) return;
     viewport.current.scrollIntoView?.({ block: "nearest" });
     return followChatBottom(viewport.current, content.current);
-  }, [threadId]);
+  }, [threadId, fillSpace]);
   return <div className="db-chat-surface" ref={viewport}><div ref={content}>
-    <ThreadChat threadId={threadId} variant="full" layout="document" permissionPolicy="inherit"/>
+    <RememberThreadPermission threadId={threadId}/>
+    <ChatFileSurface threadId={threadId}><ThreadChat threadId={threadId} variant="full" layout={fillSpace ? "contained" : "document"} permissionPolicy="editable"/></ChatFileSurface>
   </div></div>;
 }
 function ConnectionIndicator() {
+  const { t: tr, isLoading } = useTranslation();
   const connection = useRealtimeConnectionState();
-  const label = connection === "connected" ? "На связи" : "Обновление связи…";
+  const label = isLoading ? "BBDesk" : connection === "connected" ? tr("connected") : tr("reconnecting");
   return <span className="db-connection" role="status" title={label}><span className={connection === "connected" ? "db-dot running" : "db-dot waiting"} aria-hidden="true"/><span className="db-sr">{label}</span></span>;
 }
 function DashboardPage() {
+  const [workspaceMemory] = useState(readWorkspaceMemory);
+  const { t: tr, language, isLoading: languageLoading } = useTranslation();
   const launcherPanel = useLauncherPanel();
   const rpc = useRpc<typeof rpcContract>();
   const sdk = useSdk();
@@ -68,20 +85,54 @@ function DashboardPage() {
   const drafts = useDraftIds();
   const connection = useRealtimeConnectionState();
   const [data, setData] = useState<Snapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState("");
+  const [error, setError] = useState<MessageKey | null>(null);
+  const [notice, setNotice] = useState<MessageKey | "">("");
   const [opened, setOpened] = useState<string | null>(null);
+  const [historyProject, setHistoryProject] = useState<string | null>(null);
+  const [historyOpened, setHistoryOpened] = useState<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
   const [pendingCreated, setPendingCreated] = useState<{ id: string; projectId: string } | null>(null);
   const creationIntent = useRef<object | null>(null);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(workspaceMemory.projectId);
   const [searchVisible, setSearchVisible] = useState(false);
   const [filter, setFilter] = useState<"all" | "attention">("all");
   const [search, setSearch] = useState("");
   const [settings, setSettings] = useState<"projects" | "launcher" | null>(null);
+  const settingsRef = useRef<HTMLElement>(null);
+  const settingsOpener = useRef<HTMLElement | null>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const historyOpener = useRef<HTMLElement | null>(null);
+  const searchPanelRef = useRef<HTMLElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchOpener = useRef<HTMLElement | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const compactWorkspace = workspaceWidth > 0 && workspaceWidth <= 680;
+  useLayoutEffect(() => {
+    if (!mainRef.current) return;
+    const element = mainRef.current;
+    const view = element.ownerDocument.defaultView;
+    const measure = () => setWorkspaceWidth(element.clientWidth);
+    measure();
+    const Observer = typeof ResizeObserver === "undefined" ? view?.ResizeObserver : ResizeObserver;
+    const observer = Observer ? new Observer(measure) : null;
+    observer?.observe(element);
+    view?.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); view?.removeEventListener("resize", measure); };
+  }, []);
+  usePanelFocus(settingsRef, settings, settingsOpener);
+  usePanelFocus(historyRef, historyProject, historyOpener);
+  usePanelFocus(searchPanelRef, searchVisible && !settings, searchOpener, searchInputRef);
   const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
   const [launcherDraft, setLauncherDraft] = useState<DashboardConfig["launcher"]>([]);
+  const draggedApp = useRef<string | null>(null);
+  const [appDropTarget, setAppDropTarget] = useState<{ id: string; after: boolean } | null>(null);
+  const [draggingApp, setDraggingApp] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [undoHide, setUndoHide] = useState<{ id: string; projectId: string; token: string; tab: ThreadTab } | null>(null);
+  const [undoPaused, setUndoPaused] = useState(false);
+  const dismissUndo = useCallback(() => setUndoHide(null), []);
+  useUndoExpiry(undoHide?.token, undoPaused || saving, dismissUndo);
   useEffect(() => {
     if (settings === "projects" && launcherPanel.compact && launcherPanel.open) launcherPanel.close();
   }, [settings, launcherPanel.compact, launcherPanel.open, launcherPanel.close]);
@@ -91,7 +142,8 @@ function DashboardPage() {
   const enteredProject = useRef<string | null>(null);
   const report = useCallback((cause: unknown) => {
     const message = cause instanceof Error ? cause.message : String(cause);
-    setError(/[а-яё]/i.test(message) ? message : "Не удалось выполнить действие. Повторите попытку или проверьте соединение с BB.");
+    setError(message.includes("DASHBOARD_PROJECT_UNAVAILABLE") ? "projectGone"
+      : message.includes("DASHBOARD_THREAD_UNAVAILABLE") ? "threadUnavailable" : "actionFailed");
   }, []);
   const refresh = useCallback(async () => {
     if (requestRunning.current) { requestAgain.current = true; return; }
@@ -135,23 +187,65 @@ function DashboardPage() {
     if (manager && !isSubagent(manager) && allThreads.some(t => t.id === manager.id)) {
       enteredProject.current = manager.projectId;
       setActiveProjectId(manager.projectId); setOpened(manager.id);
-    } else setOpened(null);
+    } else setOpened(activeProject ? projectEntryThread(activeProject.id)?.id ?? null : null);
   }, [live.status, live.threads, opened, current, allThreads, pendingCreated]);
+  useEffect(() => {
+    if (live.status !== "ready" || !historyOpened || live.threads.some(t => t.id === historyOpened && t.projectId === activeProject?.id && !t.isHidden && !t.isArchived)) return;
+    setHistoryOpened(null);
+    setOpened(activeProject ? projectEntryThread(activeProject.id)?.id ?? null : null);
+  }, [live.status, live.threads, historyOpened, activeProject?.id]);
   const runningCount = allThreads.filter(t => isWorking(activity(t))).length;
+  function projectEntryThread(projectId: string) {
+    const threads = allThreads.filter(t => t.projectId === projectId && !isSubagent(t)).sort(compareThreads);
+    return threads.find(t => statusOf(t, tr).tone === "attention")
+      ?? threads.find(t => statusOf(t, tr).tone === "result")
+      ?? threads.find(t => ["running", "waiting"].includes(statusOf(t, tr).tone))
+      ?? threads.sort((a, b) => b.latestAttentionAt - a.latestAttentionAt || a.id.localeCompare(b.id))[0];
+  }
+  function restoreProject(projectId: string) {
+    const choice = workspaceMemory.conversations[projectId];
+    const remembered = choice && live.threads.find(t => t.id === choice.id && t.projectId === projectId
+      && !t.isHidden && !t.isArchived && !isSubagent(t) && (choice.history || allThreads.some(row => row.id === t.id)));
+    setHistoryOpened(remembered && choice.history ? remembered.id : null);
+    setOpened(remembered ? choice.history ? null : remembered.id : projectEntryThread(projectId)?.id ?? null);
+  }
   useEffect(() => {
     if (!data || live.status !== "ready" || !activeProject) return;
     if (enteredProject.current === activeProject.id) return;
     enteredProject.current = activeProject.id;
     if (creating === activeProject.id) return;
-    const threads = allThreads.filter(t => t.projectId === activeProject.id && !isSubagent(t));
-    setOpened(threads.length === 1 ? threads[0]!.id : null);
+    restoreProject(activeProject.id);
   }, [data, live.status, activeProject, allThreads, creating]);
+  useEffect(() => {
+    if (!activeProject || !data || live.status !== "ready") return;
+    workspaceMemory.projectId = activeProject.id;
+    const id = historyOpened ?? opened;
+    if (!creating && id && live.threads.some(t => t.id === id && t.projectId === activeProject.id && !t.isArchived && !t.isHidden && !isSubagent(t))) {
+      workspaceMemory.conversations[activeProject.id] = { id, history: !!historyOpened };
+    }
+    saveWorkspaceMemory(workspaceMemory);
+  }, [activeProject?.id, data, live.status, live.threads, opened, historyOpened, creating, workspaceMemory]);
   const attentionCount = allThreads.filter(needsAttention).length;
+  const projectConversations = live.threads.filter(t => t.projectId === activeProject?.id && !t.isHidden && !t.isArchived && !isSubagent(t));
+  const searchResults = projectConversations.filter(t => (filter === "all" || needsAttention(t))
+    && `${t.displayTitle} ${t.environment?.name ?? ""} ${t.environment?.branchName ?? ""}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+    .sort((a, b) => b.latestAttentionAt - a.latestAttentionAt || a.id.localeCompare(b.id));
+  const conversationItem = (t: Thread): ConversationItem => ({ id: t.id, title: t.displayTitle,
+    detail: t.environment?.name ?? t.environment?.branchName ?? t.host?.name ?? "", updatedAt: t.latestAttentionAt || t.createdAt || 0 });
+  function openConversation(t: Thread) {
+    if (allThreads.some(row => row.id === t.id)) openThread(t);
+    else {
+      creationIntent.current = null; setPendingCreated(null); setOpened(null); setCreating(null);
+      setHistoryOpened(t.id);
+    }
+    setSearchVisible(false); setSearch("");
+    if (compactWorkspace) setHistoryProject(null);
+  }
   const projectTabs = connected.map(project => {
     const info = live.projects.find(p => p.id === project.id);
     const threads = allThreads.filter(t => t.projectId === project.id);
-    const states = threads.map(t => ({ id: t.id, title: t.displayTitle, subagent: isSubagent(t), ...statusOf(t) }));
-    return { id: project.id, name: info?.name ?? "Проект недоступен", available: !!info,
+    const states = threads.map(t => ({ id: t.id, title: t.displayTitle, subagent: isSubagent(t), ...statusOf(t, tr) }));
+    return { id: project.id, name: info?.name ?? tr("projectUnavailable"), available: !!info,
       running: states.filter(state => state.tone === "running").length,
       attention: states.filter(state => state.tone === "attention").length,
       queued: threads.filter(t => t.queuedWork === "waiting").length,
@@ -159,26 +253,33 @@ function DashboardPage() {
       states };
   });
   function selectProject(id: string) {
-    if (id === activeProject?.id) return;
+    setHistoryProject(null); setHistoryOpened(null);
     creationIntent.current = null; setPendingCreated(null);
-    setActiveProjectId(id); setOpened(null); setCreating(null); setNotice("");
+    enteredProject.current = id;
+    setActiveProjectId(id); restoreProject(id); setCreating(null); setNotice("");
   }
   function openThread(t: Thread) {
+    setHistoryOpened(null);
     creationIntent.current = null; setPendingCreated(null);
     enteredProject.current = t.projectId;
     setActiveProjectId(t.projectId); setOpened(t.id); setCreating(null); setSettings(null); setNotice("");
   }
   function createInProject(id: string) {
+    setHistoryProject(null); setHistoryOpened(null);
     creationIntent.current = {}; setPendingCreated(null);
     setActiveProjectId(id); setOpened(null); setCreating(id); setNotice("");
   }
   function toggleThread(t: Thread) {
+    setHistoryOpened(null);
     creationIntent.current = null; setPendingCreated(null);
     setOpened(opened === t.id ? null : t.id); setCreating(null);
   }
   const apps = navigation?.items.filter(item => item.pluginId && item.pluginId !== pluginId) ?? [];
   function openSettings(next: "projects" | "launcher") {
     if (!config || saving) return;
+    endAppDrag();
+    if (settings !== next) settingsOpener.current = document.activeElement as HTMLElement | null;
+    setHistoryProject(null);
     setSelectedProjects(config.projects.filter(p => p.enabled).map(p => p.id));
     setLauncherDraft(config.launcher.map(item => ({ ...item })));
     setSettings(settings === next ? null : next);
@@ -189,7 +290,7 @@ function DashboardPage() {
     try {
       if (settings === "projects") await rpc.call("projects_set", { ids: selectedProjects });
       else await rpc.call("launcher_set", { items: launcherDraft });
-      await refresh(); setSettings(null); setNotice("Настройки сохранены.");
+      await refresh(); setSettings(null); setNotice("settingsSaved");
     } catch (cause) { report(cause); }
     finally { setSaving(false); }
   }
@@ -197,9 +298,29 @@ function DashboardPage() {
     setSaving(true);
     try {
       const result = await rpc.call("thread_hide", { threadId: t.id });
-      if (!result.hidden) throw new Error("Тред уже недоступен. Обновите список.");
-      if (opened === t.id) setOpened(null);
-      await refresh(); setNotice("Тред убран с рабочего стола. Новый ответ или действие вернёт его.");
+      if (!result.hidden) throw new Error("DASHBOARD_THREAD_UNAVAILABLE");
+      const projectThreads = allThreads.filter(thread => thread.projectId === t.projectId && !isSubagent(thread)).sort((a, b) => a.id.localeCompare(b.id));
+      const index = projectThreads.findIndex(thread => thread.id === t.id);
+      const next = projectThreads[index + 1] ?? projectThreads[index - 1];
+      if (workspaceMemory.conversations[t.projectId]?.id === t.id) delete workspaceMemory.conversations[t.projectId];
+      setOpened(currentId => currentId === t.id ? next?.id ?? null : currentId);
+      setUndoHide(result.undoToken ? { id: t.id, projectId: t.projectId, token: result.undoToken,
+        tab: { id: t.id, title: t.displayTitle, detail: t.environment?.name ?? "", tone: "read", status: tr("read"), canHide: false } } : null);
+      await refresh(); setNotice("threadHidden");
+      return true;
+    } catch (cause) { report(cause); return false; }
+    finally { setSaving(false); }
+  }
+  async function restoreHidden() {
+    if (!undoHide || saving) return;
+    const returnFocus = document.activeElement?.classList.contains('db-thread-undo');
+    setSaving(true); setError(null);
+    try {
+      const result = await rpc.call("thread_restore", { threadId: undoHide.id, undoToken: undoHide.token });
+      if (!result.restored) throw new Error("DASHBOARD_THREAD_UNAVAILABLE");
+      await refresh(); setUndoHide(null); setNotice("threadRestored");
+      if (returnFocus) (launcherPanel.root.current?.querySelector<HTMLElement>('.db-thread-tabs [aria-selected="true"]')
+        ?? launcherPanel.root.current?.querySelector<HTMLElement>('.db-thread-create'))?.focus();
     } catch (cause) { report(cause); }
     finally { setSaving(false); }
   }
@@ -208,98 +329,208 @@ function DashboardPage() {
     [next[index], next[index + direction]] = [next[index + direction]!, next[index]!];
     setLauncherDraft(next);
   }
-  const settingsPanel = settings && <section className="db-settings" aria-label={settings === "projects" ? "Выбор проектов" : "Настройка приложений"}>
-          <div className="db-settings-heading"><h3>{settings === "projects" ? "Проекты на рабочем столе" : "Приложения на панели"}</h3><SmallButton label="Закрыть настройки" icon="X" onClick={() => setSettings(null)} disabled={saving}/></div>
+  function endAppDrag() {
+    draggedApp.current = null;
+    setDraggingApp(null);
+    setAppDropTarget(null);
+  }
+  function appDropPosition(event: DragEvent<HTMLDivElement>, id: string) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { id, after: event.clientY >= rect.top + rect.height / 2 };
+  }
+  function dropApp(event: DragEvent<HTMLDivElement>, id: string) {
+    if (saving || !draggedApp.current) return;
+    event.preventDefault();
+    const sourceId = draggedApp.current;
+    const target = appDropPosition(event, id);
+    setLauncherDraft(previous => {
+      const source = previous.find(row => row.id === sourceId);
+      if (!source || sourceId === id) return previous;
+      const next = previous.filter(row => row.id !== sourceId);
+      const targetIndex = next.findIndex(row => row.id === id);
+      if (targetIndex < 0) return previous;
+      next.splice(targetIndex + Number(target.after), 0, source);
+      return next;
+    });
+    endAppDrag();
+  }
+  const settingsPanel = settings && <section ref={settingsRef} className="db-settings" role="dialog" aria-label={settings === "projects" ? tr("selectProjectsTitle") : tr("configureAppsTitle")}>
+          <div className="db-settings-heading"><h3>{settings === "projects" ? tr("dashboardProjects") : tr("panelApps")}</h3><SmallButton label={tr("closeSettings")} icon="X" onClick={() => setSettings(null)} disabled={saving}/></div>
           <div className="db-settings-body">
-          <p className="db-muted">{settings === "projects" ? "Добавляем текущую работу. Старые готовые ответы останутся в обычном BB." : "Выберите приложения. Порядок и названия можно изменить ниже."}</p>
+          <p className="db-muted">{settings === "projects" ? tr("projectsHelp") : tr("appsHelp")}</p>
           <div className="db-checks">{settings === "projects" ? live.projects.filter(p => !p.isPersonal).map(project => <label key={project.id}><input type="checkbox" disabled={saving} checked={selectedProjects.includes(project.id)} onChange={e => setSelectedProjects(e.target.checked ? [...selectedProjects, project.id] : selectedProjects.filter(id => id !== project.id))}/>{project.name}</label>) : apps.map(item => <label key={item.id}><input type="checkbox" disabled={saving} checked={launcherDraft.some(entry => entry.id === item.id)} onChange={e => setLauncherDraft(e.target.checked ? [...launcherDraft, { id: item.id, label: item.label }] : launcherDraft.filter(entry => entry.id !== item.id))}/><NavigationIcon icon={item.icon} className="db-icon"/>{item.label}</label>)}</div>
-          {settings === "launcher" && !navigation && <p className="db-muted">Чтобы подключить приложения, выберите «BBDesk» в настройках BB → Внешний вид → Навигация.</p>}
-          {settings === "launcher" && navigation && apps.length === 0 && <p className="db-muted">Нет доступных приложений. Установите плагин с отдельным экраном в BB.</p>}
-          {settings === "launcher" && launcherDraft.map((entry, index) => <div className="db-edit-app" key={entry.id}><label className="db-sr" htmlFor={`app-${index}`}>Название приложения {index + 1}</label><input id={`app-${index}`} className="db-input" maxLength={200} value={entry.label} disabled={saving} onChange={e => setLauncherDraft(launcherDraft.map((row, i) => i === index ? { ...row, label: e.target.value } : row))}/><SmallButton label={`Переместить ${entry.label} выше`} icon="ArrowUp" disabled={saving || index === 0} onClick={() => moveApp(index, -1)}/><SmallButton label={`Переместить ${entry.label} ниже`} icon="ArrowDown" disabled={saving || index === launcherDraft.length - 1} onClick={() => moveApp(index, 1)}/><SmallButton label={`Убрать ${entry.label} с панели приложений`} icon="X" disabled={saving} onClick={() => setLauncherDraft(launcherDraft.filter(row => row.id !== entry.id))}/></div>)}
-          {settings === "projects" && <p className="db-note">Отключение проекта только скрывает его здесь. Работа тредов продолжается.</p>}
+          {settings === "launcher" && !navigation && <p className="db-muted">{tr("navigationHelp")}</p>}
+          {settings === "launcher" && navigation && apps.length === 0 && <p className="db-muted">{tr("noApps")}</p>}
+          {settings === "launcher" && launcherDraft.map((entry, index) => <div
+            className="db-edit-app" key={entry.id}
+            data-dragging={draggingApp === entry.id || undefined}
+            data-drop={appDropTarget?.id === entry.id ? appDropTarget.after ? "after" : "before" : undefined}
+            onDragOver={event => {
+              if (saving || !draggedApp.current) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              setAppDropTarget(draggedApp.current === entry.id ? null : appDropPosition(event, entry.id));
+            }}
+            onDragLeave={event => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAppDropTarget(null);
+            }}
+            onDrop={event => dropApp(event, entry.id)}
+          >
+            <button type="button" className="db-icon-btn db-app-drag" draggable={!saving && launcherDraft.length > 1}
+              disabled={saving || launcherDraft.length < 2}
+              title={tr("dragApp", { name: entry.label })} aria-label={tr("dragApp", { name: entry.label })}
+              onDragStart={event => {
+                if (saving) { event.preventDefault(); return; }
+                draggedApp.current = entry.id;
+                setDraggingApp(entry.id);
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", entry.id);
+                event.dataTransfer.setDragImage(event.currentTarget.parentElement!, 16, 16);
+              }}
+              onDragEnd={endAppDrag}
+              onKeyDown={event => {
+                const direction = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+                if (!direction) return;
+                event.preventDefault();
+                if (index + direction >= 0 && index + direction < launcherDraft.length) moveApp(index, direction);
+              }}
+            ><Icon name="GripVertical" className="db-icon"/></button>
+            <label className="db-sr" htmlFor={`app-${index}`}>{tr("appName")} {index + 1}</label><input id={`app-${index}`} className="db-input" maxLength={200} value={entry.label} disabled={saving} onChange={e => setLauncherDraft(launcherDraft.map((row, i) => i === index ? { ...row, label: e.target.value } : row))}/><SmallButton label={tr("moveAppUp", { name: entry.label })} icon="ArrowUp" disabled={saving || index === 0} onClick={() => moveApp(index, -1)}/><SmallButton label={tr("moveAppDown", { name: entry.label })} icon="ArrowDown" disabled={saving || index === launcherDraft.length - 1} onClick={() => moveApp(index, 1)}/><SmallButton label={tr("removeApp", { name: entry.label })} icon="X" disabled={saving} onClick={() => setLauncherDraft(launcherDraft.filter(row => row.id !== entry.id))}/></div>)}
+          {settings === "projects" && <p className="db-note">{tr("projectsNote")}</p>}
           </div>
-          <div className="db-settings-footer"><button type="button" className="db-button db-primary" disabled={saving || settings === "launcher" && launcherDraft.some(row => !row.label.trim())} onClick={() => void saveSettings()}>{saving ? "Сохранение…" : "Сохранить"}</button><button type="button" className="db-button" disabled={saving} onClick={() => setSettings(null)}>Отмена</button></div>
+          <div className="db-settings-footer"><button type="button" className="db-button db-primary" disabled={saving || settings === "launcher" && launcherDraft.some(row => !row.label.trim())} onClick={() => void saveSettings()}>{saving ? tr("saving") : tr("save")}</button><button type="button" className="db-button" disabled={saving} onClick={() => setSettings(null)}>{tr("cancel")}</button></div>
         </section>;
-  return <div ref={launcherPanel.root} className={`db-root${launcherPanel.resizing ? " db-resizing" : ""}`} style={launcherPanel.style} onKeyDown={launcherPanel.onKeyDown}>
+  return <div ref={launcherPanel.root} className={`db-root${launcherPanel.resizing ? " db-resizing" : ""}`} lang={language} aria-busy={languageLoading || undefined} style={{ ...launcherPanel.style, visibility: languageLoading ? "hidden" : undefined }} onKeyDown={event => {
+    if (event.defaultPrevented) return;
+    if (event.key === "Escape") {
+      if (settings) { event.preventDefault(); event.stopPropagation(); if (!saving) setSettings(null); return; }
+      if (searchVisible) { event.preventDefault(); event.stopPropagation(); setSearchVisible(false); setSearch(""); return; }
+      if (historyProject) { event.preventDefault(); event.stopPropagation(); setHistoryProject(null); return; }
+    }
+    // Keep keyboard focus inside an overlaid history picker, away from the covered chat.
+    if (event.key === "Tab" && compactWorkspace && historyProject && historyRef.current) {
+      const buttons = historyRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]');
+      const first = buttons[0], last = buttons[buttons.length - 1];
+      if (first && (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last)) {
+        event.preventDefault(); (event.shiftKey ? last : first)?.focus();
+      }
+    }
+    launcherPanel.onKeyDown(event);
+  }}>
     <header className="db-header">
-      <button ref={launcherPanel.toggle} type="button" className="db-icon-btn db-launcher-toggle" title={launcherPanel.open ? "Скрыть приложения" : "Показать приложения"} aria-label={launcherPanel.open ? "Скрыть приложения" : "Показать приложения"} aria-expanded={launcherPanel.open} aria-controls={launcherPanel.panelId} onClick={launcherPanel.toggleOpen}><Icon name={launcherPanel.open ? "PanelLeftClose" : "PanelLeftOpen"} className="db-icon"/></button>
-      <div className="db-thread-indicators" role="group" aria-label={`Треды всех проектов. В работе: ${runningCount}. Требуют внимания: ${attentionCount}.`}>
+      <button ref={launcherPanel.toggle} type="button" className="db-icon-btn db-launcher-toggle" title={launcherPanel.open ? tr("hideApps") : tr("showApps")} aria-label={launcherPanel.open ? tr("hideApps") : tr("showApps")} aria-expanded={launcherPanel.open} aria-controls={launcherPanel.panelId} onClick={launcherPanel.toggleOpen}><Icon name={launcherPanel.open ? "PanelLeftClose" : "PanelLeftOpen"} className="db-icon"/></button>
+      <div className="db-thread-indicators" role="group" aria-label={tr("activitySummary", { working: runningCount, attention: attentionCount })}>
         {[...allThreads].sort((a, b) => a.id.localeCompare(b.id)).map(t => {
-          const state = statusOf(t);
-          const label = `${live.projects.find(project => project.id === t.projectId)?.name ?? "Проект недоступен"} · ${t.displayTitle}: ${state.text}`;
+          const state = statusOf(t, tr);
+          const label = `${live.projects.find(project => project.id === t.projectId)?.name ?? tr("projectUnavailable")} · ${t.displayTitle}: ${state.text}`;
           return <button key={t.id} type="button" className="db-thread-indicator" data-thread-id={t.id} title={label} aria-label={label} aria-pressed={opened === t.id} onClick={() => openThread(t)}><ThreadIndicator tone={state.tone} subagent={isSubagent(t)}/></button>;
         })}
       </div>
       <div className="db-header-tools">
-        <label className="db-filter"><span className="db-sr">Показывать треды</span><select aria-label="Показывать треды" value={filter} onChange={event => setFilter(event.target.value === "attention" ? "attention" : "all")}><option value="all">Все треды</option><option value="attention">Требуют внимания</option></select></label>
-        {searchVisible && <label className="db-search"><span className="db-sr">Найти тред</span><input type="search" autoFocus value={search} onChange={event => setSearch(event.target.value)} placeholder="Найти тред…"/></label>}
-        <SmallButton label={searchVisible ? "Закрыть поиск" : "Поиск тредов"} icon={searchVisible ? "X" : "Search"} onClick={() => { setSearchVisible(!searchVisible); if (searchVisible) setSearch(""); }}/>
-        <SmallButton label="Выбрать проекты" icon="FolderOpen" disabled={!data || saving} onClick={() => openSettings("projects")}/>
+        <label className="db-filter"><span className="db-sr">{tr("showThreads")}</span><select aria-label={tr("showThreads")} value={filter} onChange={event => setFilter(event.target.value === "attention" ? "attention" : "all")}><option value="all">{tr("allThreads")}</option><option value="attention">{tr("attention")}</option></select></label>
+        {searchVisible && <label className="db-search"><span className="db-sr">{tr("findThread")}</span><input ref={searchInputRef} type="search" autoFocus value={search} onChange={event => setSearch(event.target.value)} placeholder={tr("searchPlaceholder")} onKeyDown={event => {
+          if (event.key === "ArrowDown") { event.preventDefault(); searchPanelRef.current?.querySelector<HTMLButtonElement>('.db-conversation-results button')?.focus(); }
+        }}/></label>}
+        <SmallButton label={searchVisible ? tr("closeSearch") : tr("searchThreads")} icon={searchVisible ? "X" : "Search"} onClick={() => {
+          if (!searchVisible) { searchOpener.current = document.activeElement as HTMLElement | null; setSettings(null); setHistoryProject(null); }
+          setSearchVisible(!searchVisible); if (searchVisible) setSearch("");
+        }}/>
       </div>
-      <span className="db-sr" role="status">{notice}</span>
+      <span className="db-sr" role="status">{notice && tr(notice)}</span>
     </header>
-    <div className="db-layout" data-launcher-open={launcherPanel.open}>
+    <div className="db-layout" data-launcher-open={launcherPanel.open} data-launcher-overlay={launcherPanel.overlayOpen}>
       <div ref={launcherPanel.panel} id={launcherPanel.panelId} className="db-launcher-shell" inert={!launcherPanel.open} aria-hidden={!launcherPanel.open}>
-      <aside className="db-launcher" aria-label="Панель приложений">
+      <aside className="db-launcher" aria-label={tr("appsPanel")}>
         <div className="db-launcher-list">
-        {!data ? <p className="db-muted">Загрузка…</p> : config!.launcher.length === 0 ? <div className="db-launcher-empty"><Icon name="LayoutGrid" className="db-empty-icon"/><p>Ваши приложения под рукой</p><button type="button" className="db-button" onClick={() => openSettings("launcher")}>Добавить приложения</button></div> : config!.launcher.map(entry => {
+        {!data ? <p className="db-muted">{tr("loading")}</p> : config!.launcher.length === 0 ? <div className="db-launcher-empty"><Icon name="LayoutGrid" className="db-empty-icon"/><p>{tr("appsEmpty")}</p><button type="button" className="db-button" onClick={() => openSettings("launcher")}>{tr("addApps")}</button></div> : config!.launcher.map(entry => {
           const item = apps.find(candidate => candidate.id === entry.id);
           const unavailable = !item || item.isLoading || item.isDisabled;
           return <div className="db-launch-row" key={entry.id}>
-            <button type="button" className="db-launch-main" disabled={unavailable} title={unavailable ? "Приложение недоступно. Проверьте его в настройках BB." : entry.label} onClick={() => navigation?.actions.activate(entry.id, { target: "current" })}>
-              {item ? <NavigationIcon icon={item.icon} className="db-icon"/> : <Icon name="AppWindow" className="db-icon"/>}<span className="db-launch-label">{entry.label}{unavailable && <small>Недоступно</small>}</span>
+            <button type="button" className="db-launch-main" disabled={unavailable} title={unavailable ? tr("appUnavailableHelp") : entry.label} onClick={() => navigation?.actions.activate(entry.id, { target: "current" })}>
+              {item ? <NavigationIcon icon={item.icon} className="db-icon"/> : <Icon name="AppWindow" className="db-icon"/>}<span className="db-launch-label">{entry.label}{unavailable && <small>{tr("unavailable")}</small>}</span>
             </button>
-            <button type="button" className="db-launch-split" disabled={unavailable} title="Открыть рядом; если невозможно — в новой вкладке" aria-label={`Открыть ${entry.label} рядом`} onClick={() => navigation?.actions.activate(entry.id, { target: "split" })}><Icon name="Columns2" className="db-icon"/></button>
+            <button type="button" className="db-launch-split" disabled={unavailable} title={tr("splitHelp")} aria-label={tr("openAlongside", { name: entry.label })} onClick={() => navigation?.actions.activate(entry.id, { target: "split" })}><Icon name="Columns2" className="db-icon"/></button>
           </div>;
         })}
         </div>
-        <div className="db-launcher-footer"><SmallButton label="Настроить приложения" icon="Settings2" onClick={() => openSettings("launcher")} disabled={!data || saving}/></div>
-        {settings === "launcher" && <div className="db-launcher-settings">{settingsPanel}</div>}
+        <div className="db-launcher-footer"><SmallButton label={tr("configureApps")} icon="Settings2" onClick={() => openSettings("launcher")} disabled={!data || saving}/></div>
+        {settings === "launcher" && <div className="db-settings-popover db-launcher-settings">{settingsPanel}</div>}
       </aside>
       <div className="db-launcher-resize" {...launcherPanel.resizeProps}/>
       </div>
       <div className="db-launcher-backdrop" aria-hidden="true" onClick={launcherPanel.close}/>
-      <main className="db-main" aria-label="Рабочая область проектов">
-        {data && connected.length > 0 && <ProjectTabs projects={projectTabs} activeId={activeProject?.id ?? null} onSelect={selectProject} onCreate={createInProject}/>}
-        {settings === "projects" && settingsPanel}
+      <main ref={mainRef} className="db-main" aria-label={tr("workspace")} data-compact-workspace={compactWorkspace}>
+        <div className="db-project-bar">
+          {data && connected.length > 0 && <ProjectTabs projects={projectTabs} activeId={activeProject?.id ?? null} onSelect={selectProject} onCreate={createInProject}/>}
+          <div className="db-project-tools"><SmallButton label={tr("selectProjects")} icon="Settings2" disabled={!data || saving} onClick={() => openSettings("projects")}/></div>
+        </div>
+        {settings === "projects" && <div className="db-settings-popover db-project-settings">{settingsPanel}</div>}
         <div className="db-project-content">
-        {(error || data?.syncError || live.status === "error") && <div className="db-error" role="alert"><span>{error ?? "Не удалось обновить активность BB. Проверьте соединение и повторите попытку."}</span><button type="button" className="db-button" onClick={() => void refresh()}>Повторить</button></div>}
-        {connection !== "connected" && <div className="db-warning" role="status">Связь восстанавливается. Показанные состояния могут быть неактуальны.</div>}
-        {!data || live.status === "loading" ? <Empty>Загружаем проекты и активность…</Empty> : connected.length === 0 ? <Empty><Icon name="FolderOpen" className="db-empty-icon"/><h3>Выберите проекты для работы</h3><p>Здесь появятся их треды, новые ответы и запросы вашего участия.</p><button type="button" className="db-button db-primary" onClick={() => openSettings("projects")}>Выбрать проекты</button></Empty> : connected.map(projectConfig => {
+        {(error || data?.syncError || live.status === "error") && <div className="db-error" role="alert"><span>{error ? tr(error) : tr("syncFailed")}</span><button type="button" className="db-button" onClick={() => void refresh()}>{tr("retry")}</button></div>}
+        {connection !== "connected" && <div className="db-warning" role="status">{tr("connectionWarning")}</div>}
+        {!data || live.status === "loading" ? <Empty>{tr("loadingProjects")}</Empty> : connected.length === 0 ? <Empty><Icon name="FolderOpen" className="db-empty-icon"/><h3>{tr("chooseProjects")}</h3><p>{tr("chooseProjectsHelp")}</p><button type="button" className="db-button db-primary" onClick={() => openSettings("projects")}>{tr("selectProjects")}</button></Empty> : connected.map(projectConfig => {
           const project = live.projects.find(p => p.id === projectConfig.id);
           const active = projectConfig.id === activeProject?.id;
           if (!active) return <section key={projectConfig.id} id={`db-project-panel-${projectConfig.id}`} role="tabpanel" aria-labelledby={`db-project-tab-${projectConfig.id}`} hidden/>;
-          const rows = allThreads.filter(t => t.projectId === projectConfig.id && !isSubagent(t) && (t.id === opened || (filter === "all" || needsAttention(t)) && `${t.displayTitle} ${project?.name ?? ""} ${t.environment?.name ?? ""}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)) || Number(isWorking(activity(b))) - Number(isWorking(activity(a))) || b.latestAttentionAt - a.latestAttentionAt || a.id.localeCompare(b.id));
+          const rows = allThreads.filter(t => t.projectId === projectConfig.id && !isSubagent(t) && (t.id === opened || filter === "all" || needsAttention(t))).sort((a, b) => a.id.localeCompare(b.id));
           const openedSubagent = current && current.projectId === projectConfig.id && isSubagent(current) && !isFinishedSubagent(activity(current)) ? current : null;
           const hasSubagents = allThreads.some(t => t.projectId === projectConfig.id && isSubagent(t));
           const openingCreated = pendingCreated?.projectId === projectConfig.id && opened === pendingCreated.id && !current;
-          return <section className="db-project" key={projectConfig.id} id={`db-project-panel-${projectConfig.id}`} role="tabpanel" aria-labelledby={`db-project-tab-${projectConfig.id}`}>
-            {creating === projectConfig.id && <div className="db-create"><div className="db-chat-heading"><strong>Новый тред · {project?.name}</strong><SmallButton label="Закрыть создание треда" icon="X" onClick={() => { creationIntent.current = null; setCreating(null); }}/></div><div className="db-new-composer"><NewThreadComposer key={projectConfig.id} defaultProjectId={projectConfig.id} draftKey={`dashboard-new-${projectConfig.id}`} placeholder="Что нужно сделать?" layout="document" onSubmit={async request => {
-              if (request.projectId !== projectConfig.id) throw new Error("Для создания в этом проекте выберите его в поле «Проект».");
+          const historyExpanded = historyProject === projectConfig.id;
+          const history = live.threads.filter(t => t.projectId === projectConfig.id && !t.isHidden && !t.isArchived
+            && !isSubagent(t) && !allThreads.some(row => row.id === t.id))
+            .sort((a, b) => b.latestAttentionAt - a.latestAttentionAt || (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id)).slice(0, 10);
+          const displayed = historyOpened ? live.threads.find(t => t.id === historyOpened && t.projectId === projectConfig.id && !t.isHidden && !t.isArchived) : openedSubagent ?? rows.find(t => t.id === opened);
+          const singleChat = !historyExpanded;
+          return <section className="db-project db-project-workspace" data-single-chat={singleChat} data-history-open={historyExpanded} key={projectConfig.id} id={`db-project-panel-${projectConfig.id}`} role="tabpanel" aria-labelledby={`db-project-tab-${projectConfig.id}`}>
+            <div className="db-thread-workspace" id="db-thread-workspace" inert={compactWorkspace && historyExpanded || undefined}>
+            {creating === projectConfig.id && <div className="db-create"><div className="db-chat-heading"><strong>{tr("newThreadTitle", { name: project?.name ?? tr("projectUnavailable") })}</strong><SmallButton label={tr("closeCreate")} icon="X" onClick={() => { creationIntent.current = null; setCreating(null); }}/></div><div className="db-new-composer"><NewThreadComposer key={projectConfig.id} defaultProjectId={projectConfig.id} draftKey={`dashboard-new-${projectConfig.id}`} placeholder={tr("promptPlaceholder")} layout="document" onSubmit={async request => {
+              if (request.projectId !== projectConfig.id) throw new Error(tr("projectMismatch"));
               const intent = creationIntent.current;
               try {
                 const created = await sdk.threads.spawn(request);
                 if (mounted.current && intent === creationIntent.current) {
                   enteredProject.current = projectConfig.id;
                   setPendingCreated({ id: created.id, projectId: projectConfig.id });
-                  setOpened(created.id); setCreating(null); setNotice("Новый тред создан.");
+                  setOpened(created.id); setCreating(null); setNotice("threadCreated");
                 }
                 void refresh();
               }
               catch (cause) { report(cause); throw cause; }
             }}/></div></div>}
-            {openingCreated && <div className="db-chat" id={`chat-${opened}`}><div className="db-chat-heading"><span role="status">Тред создан. Обновляем состояние…</span><SmallButton label="Свернуть тред" icon="Minimize2" onClick={() => { setOpened(null); setPendingCreated(null); }}/></div><ExpandedChat threadId={opened!}/></div>}
-            {openedSubagent && <div className="db-chat" id={`chat-${openedSubagent.id}`}><div className="db-chat-heading"><span>{openedSubagent.displayTitle}</span><SmallButton label="Свернуть тред" icon="Minimize2" onClick={() => setOpened(null)}/></div><ExpandedChat threadId={openedSubagent.id}/></div>}
-            {rows.length === 0 ? !openedSubagent && !openingCreated && <div className="db-project-empty">{!project ? "Проверьте доступ к проекту или отключите его в настройках рабочего стола." : search ? "Треды не найдены." : filter === "attention" ? "Нет тредов, требующих внимания." : hasSubagents ? "Работа субагентов показана индикаторами проекта." : "Сейчас нет активных тредов. Можно создать новый."}</div> : rows.map(t => {
-              const state = statusOf(t);
-              return <div className="db-thread" key={t.id}>
-                <div className={`db-thread-line ${opened === t.id ? "expanded" : ""}`}><button type="button" className="db-thread-open" aria-expanded={opened === t.id} aria-controls={`chat-${t.id}`} onClick={() => toggleThread(t)}><ThreadIndicator tone={state.tone}/><span className="db-thread-text"><span className="db-thread-title">{t.displayTitle}</span><span className="db-thread-detail">{t.environment?.name ?? t.environment?.branchName ?? t.host?.name ?? "Окружение BB"}{drafts.has(t.id) && " · есть черновик"}</span></span><span className={`db-state ${state.tone}`}>{state.text}{t.queuedWork === "waiting" && isWorking(activity(t)) ? " · есть очередь" : ""}</span><Icon name={opened === t.id ? "ChevronUp" : "ChevronDown"} className="db-icon"/></button>{!hasWork(activity(t)) && !drafts.has(t.id) && <SmallButton label={`Убрать «${t.displayTitle}» с рабочего стола`} icon="X" disabled={saving} onClick={() => void hide(t)}/>}</div>
-                {opened === t.id && <div className="db-chat" id={`chat-${t.id}`}><ExpandedChat threadId={t.id}/></div>}
-              </div>;
-            })}
+            {openingCreated && <div className="db-chat"><div className="db-chat-heading"><span role="status">{tr("openingThread")}</span></div><ExpandedChat threadId={opened!} fillSpace/></div>}
+            {displayed && !creating && <div className="db-thread" key={displayed.id}>
+              <div className="db-thread-line"><button type="button" className="db-thread-open" title={`${displayed.displayTitle} · ${conversationItem(displayed).detail} · ${statusOf(displayed, tr).text}`} aria-expanded="true" aria-controls={`chat-${displayed.id}`} onClick={() => historyOpened ? setHistoryOpened(null) : toggleThread(displayed)}>
+                <ThreadIndicator tone={statusOf(displayed, tr).tone}/><span className="db-thread-text"><span className="db-thread-title">{displayed.displayTitle}</span><span className="db-thread-detail">{displayed.environment?.name ?? displayed.environment?.branchName ?? displayed.host?.name ?? tr("environment")}{drafts.has(displayed.id) && tr("draftSuffix")}</span></span><span className={`db-state ${statusOf(displayed, tr).tone}`}>{statusOf(displayed, tr).text}</span><Icon name="ChevronUp" className="db-icon"/></button>
+              </div>
+              <div className="db-chat" id={`chat-${displayed.id}`}><ExpandedChat threadId={displayed.id} fillSpace/></div>
+            </div>}
+            {!displayed && !creating && !openingCreated && <div className="db-project-empty">{!project ? tr("projectAccessHelp") : filter === "attention" ? tr("noAttention") : hasSubagents ? tr("subagentsHelp") : rows.length ? tr("selectThread") : tr("noThreads")}</div>}
+            </div>
+            <ThreadTabs key={projectConfig.id} activeId={opened} saving={saving} undo={undoHide?.projectId === projectConfig.id ? undoHide.tab : undefined} onUndo={() => void restoreHidden()} onUndoPauseChange={setUndoPaused} onHide={async id => { const thread = rows.find(t => t.id === id); return thread ? hide(thread) : false; }} threads={rows.map(t => ({ id: t.id, title: t.displayTitle, detail: t.environment?.name ?? t.environment?.branchName ?? t.host?.name ?? tr("environment"), tone: statusOf(t, tr).tone, status: statusOf(t, tr).text, canHide: !hasWork(activity(t)) && !drafts.has(t.id) }))}
+              leadingAction={<button type="button" className="db-thread-create db-icon-btn" disabled={!project}
+                title={tr("newThreadTitle", { name: project?.name ?? tr("projectUnavailable") })} aria-label={tr("newThreadInProject", { name: project?.name ?? tr("projectUnavailable") })}
+                onClick={() => createInProject(projectConfig.id)}><Icon name="Plus" className="db-icon"/></button>}
+              onSelect={id => { const thread = rows.find(t => t.id === id); if (thread) openThread(thread); }}>
+            <div className="db-history-bar"><button type="button" className="db-history-toggle" title={tr(historyExpanded ? "hideRecentThreads" : "showRecentThreads")} aria-label={tr(historyExpanded ? "hideRecentThreads" : "showRecentThreads")} aria-expanded={historyExpanded} aria-controls={`db-history-${projectConfig.id}`} onClick={() => {
+              if (!historyExpanded) { historyOpener.current = document.activeElement as HTMLElement | null; setSearchVisible(false); setSearch(""); setSettings(null); }
+              setHistoryProject(historyExpanded ? null : projectConfig.id);
+            }}>{tr(historyExpanded ? "hideRecentThreads" : "showRecentThreads")}<Icon name={historyExpanded ? "ChevronDown" : "ChevronUp"} className="db-icon"/></button></div>
+            </ThreadTabs>
+            {historyExpanded && compactWorkspace && <div className="db-history-backdrop" aria-hidden="true" onClick={() => setHistoryProject(null)}/>}
+            {historyExpanded && <div ref={historyRef} className="db-history" id={`db-history-${projectConfig.id}`} role="region" aria-label={tr("recentThreads")}>
+              <div className="db-picker-heading"><span>{tr("recentThreads")}</span><SmallButton label={tr("closeHistory")} icon="X" onClick={() => setHistoryProject(null)}/></div>
+              {history.length === 0 ? <div className="db-project-empty">{tr("noRecentThreads")}</div> : history.map(t => <button type="button" className="db-history-thread" key={t.id} aria-label={t.displayTitle} aria-pressed={historyOpened === t.id} aria-controls="db-thread-workspace" title={t.displayTitle} onClick={() => openConversation(t)}><span className="db-thread-title">{t.displayTitle}</span><ConversationMetadata item={conversationItem(t)}/></button>)}
+              {project && <a className="db-all-conversations" href={project.href}>{tr("allProjectThreads")}</a>}
+            </div>}
           </section>;
         })}
         </div>
+        {searchVisible && !settings && activeProject && <section ref={searchPanelRef} className="db-search-results" role="region" aria-label={tr("searchInProject", { name: live.projects.find(p => p.id === activeProject.id)?.name ?? tr("projectUnavailable") })}>
+          <p className="db-search-scope">{tr("searchInProject", { name: live.projects.find(p => p.id === activeProject.id)?.name ?? tr("projectUnavailable") })} · {tr(filter === "attention" ? "attention" : "allThreads")}</p>
+          <ConversationResults key={`${activeProject.id}:${search}:${filter}`} items={searchResults.map(conversationItem)} selectedId={historyOpened ?? opened} loading={!data || live.status === "loading"} failed={live.status === "error"}
+            onSelect={id => { const thread = searchResults.find(t => t.id === id); if (thread) openConversation(thread); }}/>
+        </section>}
       </main>
     </div>
   </div>;

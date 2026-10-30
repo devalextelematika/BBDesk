@@ -1,6 +1,8 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { reconcileThread, hideThread, type Activity, type TrackedThread } from "./state";
+import { languageSetting } from "./i18n";
 
 const id = z.string().min(1).max(200);
 const projectSchema = z.object({ id, enabled: z.boolean(), connectedAt: z.number().nonnegative() });
@@ -14,13 +16,16 @@ export const rpcContract = defineRpcContract({
   snapshot: { input: z.null(), output: z.object({ config: configSchema, tracked: z.array(trackedSchema), syncError: z.string().nullable(), syncedAt: z.number().nullable() }) },
   projects_set: { input: z.object({ ids: z.array(id).max(100) }), output: configSchema },
   launcher_set: { input: z.object({ items: configSchema.shape.launcher }), output: configSchema },
-  thread_hide: { input: z.object({ threadId: id }), output: z.object({ hidden: z.boolean() }) },
+  thread_hide: { input: z.object({ threadId: id }), output: z.object({ hidden: z.boolean(), undoToken: z.string().optional() }) },
+  thread_restore: { input: z.object({ threadId: id, undoToken: z.string().min(1).max(200) }), output: z.object({ restored: z.boolean() }) },
 });
 
 export default async function plugin(bb: BbPluginApi) {
+  bb.settings.define({ language: languageSetting });
   const stored = configSchema.safeParse(await bb.storage.kv.get("config-v1"));
   let config: DashboardConfig = stored.success ? stored.data : { projects: [], launcher: [] };
   const tracked = new Map<string, TrackedThread>();
+  const undoTokens = new Map<string, string>();
   for (const key of await bb.storage.kv.list("thread:")) {
     const parsed = trackedSchema.safeParse(await bb.storage.kv.get(key));
     if (parsed.success) tracked.set(parsed.data.id, parsed.data);
@@ -95,7 +100,7 @@ export default async function plugin(bb: BbPluginApi) {
       const projects = await bb.sdk.projects.list();
       const known = new Set(projects.map(p => p.id));
       const selected = new Set(ids);
-      if (ids.some(projectId => !known.has(projectId))) throw new Error("Проект больше не доступен. Обновите список.");
+      if (ids.some(projectId => !known.has(projectId))) throw new Error("DASHBOARD_PROJECT_UNAVAILABLE");
       const next = config.projects.map(p => ({ ...p, enabled: selected.has(p.id) }));
       const now = Date.now();
       for (const projectId of selected) if (!next.some(p => p.id === projectId)) next.push({ id: projectId, enabled: true, connectedAt: now });
@@ -112,8 +117,24 @@ export default async function plugin(bb: BbPluginApi) {
       const next = hideThread(previous, activity(row));
       await bb.storage.kv.set("thread:" + threadId, next);
       tracked.set(threadId, next);
+      const undoToken = randomUUID();
+      undoTokens.delete(threadId);
+      undoTokens.set(threadId, undoToken);
+      if (undoTokens.size > 100) undoTokens.delete(undoTokens.keys().next().value!);
       publish();
-      return { hidden: true };
+      return { hidden: true, undoToken };
+    }),
+    thread_restore: ({ threadId, undoToken }) => serial(async () => {
+      const previous = tracked.get(threadId);
+      if (undoTokens.get(threadId) !== undoToken || !previous || !config.projects.some(p => p.id === previous.projectId && p.enabled)) return { restored: false };
+      const [row] = await bb.sdk.threads.list({ threadIds: [threadId], archived: false, includeHidden: false, limit: 1 });
+      if (!row || row.visibility === "hidden" || row.archivedAt !== null || row.deletedAt !== null || row.projectId !== previous.projectId) return { restored: false };
+      const next = { ...previous, visible: true, latestAttentionAt: row.latestAttentionAt };
+      await bb.storage.kv.set("thread:" + threadId, next);
+      tracked.set(threadId, next);
+      undoTokens.delete(threadId);
+      publish();
+      return { restored: true };
     }),
   });
   bb.background.service("activity", {

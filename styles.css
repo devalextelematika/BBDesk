@@ -1,5 +1,6 @@
 /* Local controls, plus the scoped native voice-send contrast repair below. */
 .db-root {
+  position: relative;
   --db-accent: #5263e8;
   --db-system-text: color-mix(in srgb,var(--foreground) 65%,var(--background));
   --db-project-text: color-mix(in srgb,var(--foreground) 80%,var(--background));
@@ -48,8 +49,10 @@
 .db-launcher-backdrop { display:none; }
 .db-launcher-list { display:flex; flex-direction:column; gap:9px; flex:1; min-height:0; overflow-y:auto; }
 .db-launcher-footer { display:flex; flex-shrink:0; justify-content:flex-start; padding-top:6px; }
-.db-launcher-settings { position:absolute; z-index:3; left:12px; top:18px; bottom:56px; display:flex; width:min(520px,calc(100cqw - 24px)); min-height:0; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--background); box-shadow:0 8px 24px color-mix(in srgb,var(--foreground) 12%,transparent); }
-.db-launcher-settings .db-settings { flex:1; max-height:100%; margin:0; border:0; border-radius:0; background:var(--background); }
+.db-settings-popover { position:absolute; z-index:3; display:flex; min-width:0; min-height:0; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--background); box-shadow:0 8px 24px color-mix(in srgb,var(--foreground) 12%,transparent); }
+.db-launcher-settings { left:12px; top:18px; bottom:56px; width:min(520px,calc(100cqw - 24px)); }
+.db-project-settings { grid-area:2 / 1; right:8px; top:8px; bottom:12px; width:min(520px,calc(100% - 16px)); }
+.db-settings-popover .db-settings { flex:1; max-height:100%; margin:0; border:0; border-radius:0; background:var(--background); }
 .db-launcher-head { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; margin-bottom:8px; padding-left:4px; }
 .db-launcher-head h2 { min-width:0; font-size:13px; font-weight:500; margin:0; overflow-wrap:anywhere; color:var(--db-system-text); }
 .db-icon { width:16px; height:16px; flex-shrink:0; }
@@ -70,26 +73,114 @@
 .db-launcher-empty { min-width:0; max-width:100%; padding:12px 4px; color:var(--db-system-text); font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
 .db-launcher-empty p { margin:10px 0 14px; }
 .db-launcher-empty .db-button { width:100%; white-space:normal; overflow-wrap:anywhere; }
-.db-main { position:relative; isolation:isolate; z-index:0; display:flex; flex-direction:column; min-width:0; min-height:0; width:100%; margin:0; padding:0; overflow:hidden; }
+.db-main { container:project-workspace / inline-size; position:relative; isolation:isolate; z-index:0; display:grid; grid-template-rows:auto minmax(0,1fr); min-width:0; min-height:0; width:100%; margin:0; padding:0; overflow:hidden; }
 /* Only project contents scroll; the top bar and project tabs stay in place. */
-.db-project-content { flex:1; min-width:0; min-height:0; overflow:auto; }
+/* Keep native chat layers below the sibling project settings popover. */
+.db-project-content { grid-area:2 / 1; isolation:isolate; min-width:0; min-height:0; overflow:auto; }
 .db-muted { margin:0; color:var(--db-system-text); font-size:13px; line-height:1.6; }
 .db-search { display:flex; align-items:center; gap:7px; flex:1 1 170px; min-width:0; min-height:40px; max-width:260px; margin-left:auto; padding:7px 10px; border:1px solid var(--border); border-radius:6px; color:var(--muted-foreground); }
 .db-search input { width:100%; min-width:0; border:0; background:transparent; color:var(--foreground); font:inherit; font-size:13px; }
 .db-search input::placeholder { color:var(--db-system-text); }
-.db-project-tabs { display:flex; align-items:stretch; gap:2px; min-width:0; max-width:100%; padding:0 8px; flex-shrink:0; overflow-x:auto; border-bottom:1px solid var(--border); scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
-.db-project-tab-wrap { display:flex; align-items:center; flex-shrink:0; min-width:0; margin:5px 0; border-radius:6px; }
+.db-project-bar { grid-area:1 / 1; display:flex; align-items:flex-start; min-width:0; border-bottom:1px solid var(--border); }
+.db-project-tools { display:flex; align-items:center; flex-shrink:0; margin-left:auto; padding:4px 8px; }
+.db-project-tabs { display:flex; flex-wrap:wrap; align-items:stretch; flex:1; gap:2px; min-width:0; max-width:100%; padding:0 8px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+.db-project-tab-wrap { display:flex; align-items:center; flex-shrink:0; min-width:0; max-width:100%; margin:5px 0; border-radius:6px; }
 .db-project-tab-wrap.selected { background:color-mix(in srgb,var(--db-accent) 9%,var(--background)); }
-.db-project-tab { display:flex; align-items:center; gap:9px; min-height:32px; padding:5px 8px 5px 10px; border:0; border-radius:6px; background:transparent; color:var(--db-project-text); font:inherit; font-size:13px; white-space:nowrap; cursor:pointer; }
+.db-project-tab { display:flex; align-items:center; gap:9px; min-width:0; min-height:32px; padding:5px 8px 5px 10px; border:0; border-radius:6px; background:transparent; color:var(--db-project-text); font:inherit; font-size:13px; cursor:pointer; }
 .db-project-tab:hover { background:var(--state-hover); }
 .db-project-tab:focus-visible, .db-tab-create:focus-visible { outline:2px solid var(--ring); outline-offset:-3px; }
-.db-project-tab-name { font-weight:550; }
-.db-project-tab-states { display:inline-flex; align-items:center; gap:4px; }
+.db-project-tab-name { min-width:0; font-weight:550; overflow-wrap:anywhere; }
+.db-project-tab-states { display:inline-flex; flex-wrap:wrap; align-items:center; min-width:0; gap:4px; }
 .db-tab-create.db-icon-btn { width:28px; height:28px; padding:6px; margin-right:6px; }
+.db-root .db-tab-create > .db-icon { width:10px; height:10px; }
 .db-project { flex:1; min-width:0; min-height:0; margin:0; border:0; background:var(--background); }
 .db-project[hidden] { display:none; }
+.db-root .db-project-content { display:flex; flex-direction:column; overflow:hidden; }
+.db-root .db-project-workspace { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; flex:1; min-height:0; overflow:hidden; }
+.db-root .db-project-workspace[data-history-open="true"] { grid-template-columns:minmax(0,1fr) clamp(140px,28%,280px); }
+.db-root .db-thread-workspace { grid-area:1 / 1; min-width:0; }
+.db-root .db-thread-dock { grid-row:2; grid-column:1 / -1; }
+.db-root .db-project-workspace[hidden] { display:none; }
+.db-root .db-thread-workspace, .db-root .db-thread-workspace > .db-thread { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+/* Keep host chat/composer layers below the dashboard's thread pickers. */
+.db-root .db-thread-workspace { position:relative; isolation:isolate; z-index:0; }
+.db-root .db-thread-workspace .db-thread-line { flex:0 0 68px; overflow:hidden; }
+.db-root .db-thread-workspace .db-thread-open { height:68px; grid-template-columns:12px minmax(0,1fr) auto 16px; }
+.db-root .db-thread-workspace .db-thread-open > .db-state, .db-root .db-thread-workspace .db-thread-open > .db-icon { grid-column:auto; grid-row:auto; }
+.db-root .db-thread-workspace .db-thread-open > .db-dot { align-self:center; margin-top:0; }
+.db-root .db-thread-workspace .db-thread-detail { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.db-root .db-thread-workspace .db-chat { display:flex; flex-direction:column; flex:1; min-height:0; }
+.db-root .db-thread-workspace .db-chat-surface { display:flex; flex:1; height:auto; min-height:0; overflow:hidden; }
+.db-root .db-thread-workspace .db-chat-surface > div { display:flex; flex-direction:column; min-height:0; height:100%; width:100%; }
+.db-root .db-thread-workspace .db-create { flex:1; min-height:0; overflow:auto; }
+.db-root .db-thread-workspace .db-thread-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.db-root .db-thread-dock { position:relative; z-index:1; display:flex; align-items:center; gap:4px; flex:0 0 40px; min-width:0; padding:0 8px; border-top:1px solid var(--db-soft-border); }
+.db-root .db-thread-create.db-icon-btn { flex:0 0 32px; width:32px; height:32px; padding:7px; }
+.db-root .db-thread-create > .db-icon { width:14px; height:14px; }
+.db-root .db-thread-create:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+.db-root .db-thread-tabs { display:flex; align-items:center; flex:1; min-width:0; overflow:hidden; gap:4px; }
+.db-root .db-thread-tab-item { display:flex; align-items:center; flex:0 1 164px; min-width:0; border-radius:5px; }
+.db-root .db-thread-tab-item[data-selected="true"] { background:color-mix(in srgb,var(--db-accent) 9%,var(--background)); }
+.db-root .db-thread-tab-item .db-thread-tab { flex:1; width:0; }
+.db-root .db-thread-tab-item .db-thread-tab[aria-selected="true"] { background:transparent; }
+.db-root .db-thread-hide { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:28px; padding:5px; border:0; border-radius:4px; background:transparent; color:var(--db-system-text); cursor:pointer; }
+.db-root .db-thread-hide > .db-icon { width:10px; height:10px; }
+.db-root .db-thread-hide:hover { background:var(--state-hover); color:var(--foreground); }
+.db-root .db-thread-hide:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+.db-root .db-thread-hide:disabled { opacity:.4; cursor:default; }
+.db-root .db-thread-overflow-item { display:flex; align-items:center; min-width:0; }
+.db-root .db-thread-overflow-item > button:first-child { flex:1; min-width:0; width:0; }
+.db-root .db-thread-overflow .db-thread-hide { flex:0 0 28px; width:28px; min-height:28px; height:28px; padding:5px; justify-content:center; }
+.db-root .db-thread-tab { display:flex; align-items:center; gap:7px; flex:0 1 164px; min-width:0; height:32px; padding:0 9px; border:0; border-radius:5px; background:transparent; color:var(--db-project-text); font:inherit; font-size:12px; cursor:pointer; }
+.db-root .db-thread-tab > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.db-root .db-thread-tab[aria-selected="true"] { background:color-mix(in srgb,var(--db-accent) 9%,var(--background)); color:var(--foreground); }
+.db-root .db-thread-tab:hover, .db-root .db-thread-more:hover, .db-root .db-thread-overflow button:hover { background:var(--state-hover); }
+.db-root .db-thread-tab:focus-visible, .db-root .db-thread-more:focus-visible, .db-root .db-thread-overflow button:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+.db-root .db-thread-more { flex-shrink:0; height:32px; padding:0 8px; border:0; border-radius:5px; background:transparent; color:var(--db-project-text); font:inherit; font-size:12px; cursor:pointer; white-space:nowrap; }
+.db-root .db-thread-dock .db-history-bar { padding:0; border:0; }
+.db-root .db-thread-dock .db-history-toggle { width:30px; overflow:hidden; font-size:0; justify-content:center; }
+.db-root .db-thread-dock .db-history-toggle .db-icon { width:16px; height:16px; }
+.db-root .db-thread-overflow { position:absolute; bottom:46px; right:8px; z-index:10; width:min(400px,calc(100% - 16px)); max-height:min(360px,calc(100% - 60px)); overflow:auto; padding:16px; border:1px solid var(--border); border-radius:8px; background:var(--background); }
+.db-root .db-project-workspace > .db-history { grid-area:1 / 2; min-height:0; overflow:auto; padding:8px; border-left:1px solid var(--db-soft-border); background:var(--background); overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+.db-root .db-history-thread { display:block; width:100%; min-height:32px; padding:7px 9px; border:0; border-radius:5px; background:transparent; color:var(--db-project-text); font:inherit; font-size:12px; text-align:left; cursor:pointer; }
+.db-root .db-history-thread .db-thread-title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:inherit; font-weight:400; }
+.db-root .db-history-thread .db-thread-title, .db-root .db-conversation-results .db-thread-title { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; white-space:normal; overflow:hidden; overflow-wrap:anywhere; }
+.db-conversation-meta { display:flex; align-items:baseline; gap:8px; min-width:0; margin-top:3px; color:var(--db-system-text); font-size:11px; }
+.db-conversation-meta time { flex-shrink:0; font-variant-numeric:tabular-nums; }
+.db-conversation-meta > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.db-picker-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; color:var(--db-system-text); font-size:12px; }
+.db-all-conversations { display:block; padding:10px 9px; color:var(--db-project-text); font-size:12px; text-underline-offset:3px; }
+.db-all-conversations:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+.db-search-results { grid-area:2 / 1; position:absolute; top:8px; right:8px; z-index:4; width:min(460px,calc(100% - 16px)); max-height:calc(100% - 16px); overflow:auto; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--background); box-shadow:0 8px 24px color-mix(in srgb,var(--foreground) 12%,transparent); overscroll-behavior:contain; }
+.db-search-scope { margin:0 0 10px; color:var(--db-system-text); font-size:12px; overflow-wrap:anywhere; }
+.db-conversation-results { display:flex; flex-direction:column; gap:3px; }
+.db-root .db-conversation-results > .db-button { align-self:flex-start; margin-top:8px; }
+.db-root [data-undo="true"] { background:color-mix(in srgb,var(--foreground) 3%,var(--background)); }
+.db-root .db-thread-undo { color:var(--db-system-text); gap:8px; }
+.db-root .db-thread-undo .db-undo-tab-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.65; }
+.db-root .db-thread-undo .db-icon { width:14px; height:14px; flex-shrink:0; }
+.db-root .db-thread-undo:hover .db-undo-tab-title, .db-root .db-thread-undo:focus-visible .db-undo-tab-title { opacity:1; }
+.db-root .db-thread-undo:disabled { cursor:default; }
+.db-root .db-history-thread:hover { background:var(--state-hover); }
+.db-root .db-history-thread[aria-pressed="true"] { background:color-mix(in srgb,var(--db-accent) 9%,var(--background)); color:var(--foreground); }
+.db-root .db-history-thread:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+@media (pointer:coarse) { .db-root .db-history-thread { min-height:44px; } }
+.db-root .db-thread-overflow { bottom:46px; max-height:min(360px,60vh); }
+.db-root .db-thread-overflow-list { max-height:260px; overflow:auto; margin-top:8px; }
+.db-root .db-thread-overflow button { display:flex; align-items:center; gap:8px; width:100%; min-height:36px; padding:6px; border:0; border-radius:4px; background:transparent; color:var(--foreground); font:inherit; font-size:12px; text-align:left; cursor:pointer; }
+.db-root .db-thread-overflow button > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.db-root .db-thread-overflow small { color:var(--db-system-text); }
+@media (pointer:coarse) { .db-root .db-thread-dock { flex-basis:48px; } .db-root .db-thread-tab, .db-root .db-thread-more { height:44px; } }
+@media (pointer:coarse) { .db-root .db-thread-create.db-icon-btn { flex-basis:44px; width:44px; height:44px; } }
+@media (pointer:coarse) { .db-root .db-thread-hide, .db-root .db-thread-overflow .db-thread-hide { flex-basis:44px; width:44px; height:44px; min-height:44px; } }
 .db-project > .db-thread:first-child { border-top:0; }
 .db-thread { border-top:1px solid var(--border); }
+.db-root .db-history-bar { display:flex; justify-content:flex-end; flex-shrink:0; border-top:1px solid var(--border); padding:2px 10px; }
+.db-root .db-history-toggle { display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; min-height:30px; padding:4px; border:0; background:transparent; color:var(--db-system-text); font-size:12px; text-align:right; text-underline-offset:3px; }
+.db-root .db-history-toggle:hover { color:var(--foreground); text-decoration:underline; }
+.db-root .db-history-toggle:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.db-root .db-history { min-width:0; }
+@media (pointer:coarse) { .db-root .db-history-toggle { min-height:44px; } }
 .db-thread:last-child { border-radius:0 0 8px 8px; }
 .db-thread-line { display:flex; align-items:center; min-width:0; padding-right:6px; }
 .db-thread-line:hover { background:color-mix(in srgb,var(--foreground) 3%,var(--background)); }
@@ -123,6 +214,13 @@
 .db-chat-heading > strong { color:var(--db-project-text); }
 .db-chat-surface { min-width:0; min-height:360px; height:clamp(360px,65vh,720px); border:1px solid var(--db-soft-border); border-radius:7px; overflow:auto; background:var(--background); }
 .db-chat-surface > * { min-width:0; flex:1; }
+/* One conversation fills the workspace; multiple thread rows keep document layout. */
+.db-project-content:has(> .db-project[data-single-chat="true"]) { display:flex; flex-direction:column; overflow:hidden; }
+.db-project[data-single-chat="true"], .db-project[data-single-chat="true"] > .db-thread { display:flex; flex-direction:column; flex:1; min-height:0; }
+.db-project[data-single-chat="true"] .db-thread-line { flex-shrink:0; }
+.db-project[data-single-chat="true"] .db-chat { display:flex; flex-direction:column; flex:1; min-height:0; }
+.db-project[data-single-chat="true"] .db-chat-surface { display:flex; flex:1; height:auto; min-height:0; overflow:hidden; }
+.db-project[data-single-chat="true"] .db-chat-surface > div { display:flex; flex-direction:column; min-height:0; height:100%; }
 .db-create { min-width:0; padding:0 14px 14px; border-top:1px solid var(--border); background:var(--background); }
 .db-new-composer { min-width:0; min-height:200px; padding:10px; border:1px solid var(--border); border-radius:7px; background:var(--background); }
 /* Beautiful Chat's generic action-button ink overrides the native voice send
@@ -150,6 +248,14 @@
 .db-checks label { display:flex; align-items:center; gap:8px; min-width:0; min-height:36px; font-size:13px; cursor:pointer; overflow-wrap:anywhere; }
 .db-checks input { flex-shrink:0; width:16px; height:16px; accent-color:var(--primary); }
 .db-edit-app { display:flex; align-items:center; gap:5px; width:100%; min-width:0; margin:8px 0; }
+.db-root .db-edit-app { position:relative; }
+.db-root .db-app-drag { flex-shrink:0; cursor:grab; }
+.db-root .db-app-drag:active { cursor:grabbing; }
+.db-root .db-app-drag:disabled { cursor:default; }
+.db-root .db-edit-app[data-dragging] { opacity:.5; }
+.db-root .db-edit-app[data-drop]::after { content:""; position:absolute; left:0; right:0; height:2px; background:var(--primary); pointer-events:none; }
+.db-root .db-edit-app[data-drop="before"]::after { top:-5px; }
+.db-root .db-edit-app[data-drop="after"]::after { bottom:-5px; }
 .db-input { flex:1; min-width:0; padding:8px 10px; border:1px solid var(--border); border-radius:5px; background:var(--background); color:var(--foreground); font:inherit; }
 .db-settings-footer { display:flex; flex-shrink:0; flex-wrap:wrap; gap:8px; margin-top:18px; }
 .db-note { margin:12px 0 0; font-size:12px; color:var(--db-system-text); line-height:1.6; overflow-wrap:anywhere; }
@@ -159,6 +265,26 @@
 .db-warning { color:var(--warning-text,var(--warning)); }
 .db-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 /* The panel can be narrow inside a wide BB window: query it, not the viewport. */
+/* Keep at least 300px for wrapping tabs; below that, use one scrollable row. */
+@container project-workspace (max-width:350px) {
+  .db-project-tabs { flex-wrap:nowrap; overflow-x:auto; }
+  .db-project-tab-wrap { max-width:none; }
+  .db-project-tab { white-space:nowrap; }
+  .db-project-tab-states { flex-wrap:nowrap; }
+}
+@container project-workspace (max-width:680px) {
+  .db-root .db-project-tabs { flex-wrap:nowrap; overflow-x:auto; }
+  .db-root .db-project-tab-wrap { max-width:none; }
+  .db-root .db-project-tab { white-space:nowrap; }
+  .db-root .db-project-tab-name { max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+  .db-root .db-project-tab-states { flex-wrap:nowrap; }
+  .db-root .db-project-workspace[data-history-open="true"] { grid-template-columns:minmax(0,1fr); }
+  .db-root .db-project-workspace > .db-history { position:absolute; grid-area:auto; top:8px; right:8px; bottom:48px; z-index:3; width:min(360px,calc(100% - 16px)); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px color-mix(in srgb,var(--foreground) 12%,transparent); }
+  .db-history-backdrop { position:absolute; inset:0 0 40px; z-index:2; background:color-mix(in srgb,var(--background) 65%,transparent); }
+  .db-root .db-thread-workspace .db-thread-line { flex-basis:48px; }
+  .db-root .db-thread-workspace .db-thread-open { height:48px; padding:8px 10px; }
+  .db-root .db-thread-workspace .db-thread-detail { display:none; }
+}
 @container dashboard (max-width:960px) {
   .db-search { max-width:none; }
 }
@@ -174,8 +300,10 @@
 @container dashboard (max-width:680px) {
   .db-layout, .db-layout[data-launcher-open="false"] { grid-template-columns:minmax(0,1fr); }
   .db-launcher-shell { position:absolute; inset:0 auto 0 0; }
+  /* Resizing must not flash an overlay before ResizeObserver updates React. */
+  .db-layout[data-launcher-overlay="false"] .db-launcher-shell { visibility:hidden; pointer-events:none; }
   .db-launcher { overflow:hidden; }
-  .db-layout[data-launcher-open="true"] .db-launcher-backdrop { display:block; position:absolute; inset:0; z-index:1; background:color-mix(in srgb,var(--foreground) 18%,transparent); }
+  .db-layout[data-launcher-overlay="true"] .db-launcher-backdrop { display:block; position:absolute; inset:0; z-index:1; background:color-mix(in srgb,var(--background) 18%,transparent); }
 }
 @container dashboard (max-width:420px) {
   .db-header { gap:5px 9px; padding:6px 10px; }

@@ -1,5 +1,7 @@
+import { useLayoutEffect, useRef } from "react";
 import { Icon } from "./components/ui/icon";
 import { ThreadIndicator } from "./components/thread-indicator";
+import { useTranslation } from "./use-translation";
 
 export interface ProjectTab {
   id: string;
@@ -18,11 +20,14 @@ export function ProjectTabs({ projects, activeId, onSelect, onCreate }: {
   onSelect: (id: string) => void;
   onCreate: (id: string) => void;
 }) {
-  return <div className="db-project-tabs" role="tablist" aria-label="Проекты">
+  const { t: tr } = useTranslation();
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { root.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }, [activeId]);
+  return <div ref={root} className="db-project-tabs" role="tablist" aria-label={tr("projects")}>
     {projects.map(project => {
       const active = project.id === activeId;
-      const summary = `в работе: ${project.running}, требуют внимания: ${project.attention}, в очереди: ${project.queued}, результаты: ${project.states.filter(state => state.tone === "result" || state.tone === "read").length}`;
-      const description = !project.available ? "Недоступен" : project.states.length ? summary : project.total ? "Результаты" : "Нет активности";
+      const summary = tr("projectSummary", { working: project.running, attention: project.attention, queued: project.queued, results: project.states.filter(state => state.tone === "result" || state.tone === "read").length });
+      const description = !project.available ? tr("unavailableProject") : project.states.length ? summary : project.total ? tr("results") : tr("noActivity");
       return <div className={`db-project-tab-wrap${active ? " selected" : ""}`} role="presentation" key={project.id}>
         <button type="button" role="tab" id={`db-project-tab-${project.id}`} aria-controls={`db-project-panel-${project.id}`}
           aria-selected={active} tabIndex={active ? 0 : -1} className="db-project-tab" aria-label={`${project.name}, ${summary}. ${project.states.map(state => `${state.title}: ${state.text}`).join("; ")}`} title={`${project.name}: ${description}`}
@@ -46,7 +51,7 @@ export function ProjectTabs({ projects, activeId, onSelect, onCreate }: {
           </span>}
         </button>
         <button type="button" className="db-tab-create db-icon-btn" disabled={!project.available}
-          title={`Новый тред · ${project.name}`} aria-label={`Новый тред в проекте «${project.name}»`}
+          title={tr("newThreadTitle", { name: project.name })} aria-label={tr("newThreadInProject", { name: project.name })}
           onClick={() => onCreate(project.id)}><Icon name="Plus" className="db-icon"/></button>
       </div>;
     })}

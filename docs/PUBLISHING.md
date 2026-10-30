@@ -1,45 +1,59 @@
-# Подготовка отдельного Git-репозитория
+# Publishing and verification
 
-Будущий корень репозитория — папка `bb-plugin-dashboard`, содержащая `package.json`. Родительская рабочая папка, старые ZIP и материалы проекта BB не нужны в репозитории плагина.
+The repository root is the plugin directory containing package.json. Parent-workspace files, generated archives, dependencies, build output and machine-local reports are not part of the source repository.
 
-## Уже подготовлено
+## Repository and identity
 
-- README с назначением, требованиями, локальной установкой и ограничениями.
-- `.gitignore` для зависимостей, сборок, архивов, локальных настроек, секретов, баз и отчётов.
-- `.editorconfig` и `.gitattributes` для UTF-8 и переводов строк.
-- GitHub Actions: установка по lockfile, проверка типов и тесты на Node.js 24.22.1.
-- Исходный README сохранён локально в игнорируемом `docs/local/development-history.md`; прежние `*-verification.md` также остаются локальными материалами.
+- Repository: https://github.com/devalextelematika/BBDesk.
+- Package name: bb-plugin-dashboard. Plugin ID: dashboard. Keep both stable to preserve routes and stored settings.
+- License: MIT, copyright 2026 devalextelematika.
+- THIRD_PARTY_NOTICES.md retains the MIT notices for BB (Michael Yong, 2026) and shadcn/ui (shadcn, 2023). The BB license was checked at desktop-v0.48.0, the registry version recorded in components.json. npm dependencies retain their own licenses.
 
-## Репозиторий и лицензия
+## Language policy
 
-- Целевой репозиторий: https://github.com/devalextelematika/BBDesk, публичный. Создание репозитория и загрузка исходников разрешены владельцем.
-- Владелец выбрал MIT. Добавлен LICENSE с правообладателем `devalextelematika` (имя аккаунта GitHub) и годом 2026; лицензия согласована в package.json и корневой записи lockfile.
-- В package.json указаны реальные `repository`, `homepage` и `bugs`. Имя пакета и ID плагина сохранены.
+The default interface language is English; Russian is the additional supported language. Interface language is a native BB plugin setting shared by clients of the same server. Missing preferences use English, including on existing installations. User content and native BB components are outside the translation catalogs.
 
-Для заимствованных UI-компонентов добавлен THIRD_PARTY_NOTICES.md с полными MIT-уведомлениями BB (Michael Yong, 2026) и shadcn/ui (shadcn, 2023). Лицензия BB проверена по тегу desktop-v0.48.0, указанному в components.json; лицензия shadcn/ui — по upstream-репозиторию. Установленные npm-зависимости сохраняют собственные лицензии.
+The primary README, plugin description, overview, agent skill and release documentation are maintained in English. Russian text in the locale catalog, language option and test fixtures is intentional.
 
-## Проверки перед первым push
+## Before publishing
 
-Просмотреть полный список файлов, предназначенных для коммита, включая скрытые. `.gitignore` не удаляет секреты из уже отслеживаемых файлов и не является сканером содержимого.
+Review the complete staged file list, including hidden files. Gitignore rules do not remove secrets from tracked files and are not a content scanner. Keep dependency lockfiles synchronized with package metadata.
 
-В чистой копии выполнить `npm ci --include=dev`, `npm run typecheck`, `npm test`, `npm run build`. Для Git-установки отдельно проверить сборку с production-зависимостями: BB устанавливает их с `--omit=dev --omit=optional --ignore-scripts` и собирает исходники самостоятельно. Текущая локальная сборка с node_modules не доказывает такую установку.
+In a clean source copy run:
 
-Проверку установленного плагина, его настроек и интерфейса отмечать отдельно от тестов и сборки. Подготовка репозитория не требует установки, перезагрузки или запуска агентов.
+```sh
+npm ci --include=dev
+npm run typecheck
+npm test
+npm run build
+```
 
-Владелец разрешил первый коммит, создание репозитория и push в main. Для будущих выпусков использовать новые semver-теги, например `v0.1.3`; опубликованные теги не перемещать. GitHub Release и публикация в npm не входят в начальную загрузку исходников.
+Also check a clean build with production dependencies installed using `npm ci --omit=dev --omit=optional --ignore-scripts`, matching BB's Git installation dependency policy. A build from an existing development node_modules directory does not establish this.
 
-## Что не выполняет CI
+Verify the installed plugin separately: English by default; both language choices in native plugin settings; persistence after reload; updates in another connected client; no loss of the open chat, search or unsaved edits; and usable layouts in narrow panes. Source tests and a build are separate evidence from a live BB check.
 
-CI не устанавливает плагин в BB, не запускает живых агентов, не загружает ZIP и не публикует npm-пакеты или GitHub Releases. Сборка CLI BB и проверка Git-установки остаются отдельными проверками перед выпуском.
+Publication requires an explicit owner instruction. Local implementation does not authorize commits, pushes, tags, GitHub Releases or npm publication. For a future release, choose the next version, synchronize package.json and package-lock.json, and use a new semver tag. Never move a published tag.
 
-## Локальная проверка подготовки — 2026-10-30
+## Version 0.1.4
 
-Проверено на Windows, Node.js 24.22.1, npm 11.19.1 и BB 0.48.0:
+Version **0.1.4** has matching package and lockfile versions. `CHANGELOG.md` describes the changes since the 0.1.3 source baseline. The English GitHub Release title is **BBDesk v0.1.4**; its body is [docs/releases/v0.1.4.md](releases/v0.1.4.md).
 
-- В рабочей папке прошли проверка типов, все 42 теста и сборка.
-- Из 46 файлов, не исключённых правилами Git, создана отдельная чистая копия без исходных node_modules и dist.
-- В этой копии прошли `npm ci --omit=dev --omit=optional --ignore-scripts` и сборка CLI BB. Это проверка сборки с production-зависимостями, без подключения Git-источника к установленному BB.
-- После `npm ci --include=dev` в чистой копии также прошли проверка типов и все 42 теста.
-- Правила Git исключают зависимости, dist, архивы, локальные отчёты, .env, .npmrc и типовые файлы секретов/баз. Ограниченный поиск типовых форматов токенов и закрытых ключей в кандидатах не дал совпадений; это не полный аудит безопасности.
+Before committing, include new source files and locale catalogs as well as changes to tracked files. Review `git status --short`, the staged diff and the checks on the exact revision to be published. Do not commit `node_modules`, `dist`, archives or local verification notes.
 
-Сборщик и чистая установка зависимостей потребовали запуска вне песочницы из-за `spawn EPERM`. Эта запись описывает локальные проверки до первой загрузки на GitHub. Плагин не устанавливался и не перезагружался; живой интерфейс в рамках подготовки не проверялся. Результаты GitHub Actions доступны на вкладке Actions репозитория.
+Once publication is explicitly authorized, commit the reviewed source to the existing repository and push the intended branch. If a tagged release is requested, create a new `v0.1.4` tag on the tested commit and publish release notes from the changelog. The default-branch installation command in the README does not require a tag. A version-pinned installation after the tag is published is:
+
+```sh
+bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.4
+```
+
+Record the actual check results and any remaining live-UI checks in the release review. Keep detailed machine-specific logs under ignored `docs/local/` or outside the repository.
+
+## CI scope
+
+GitHub Actions installs development dependencies, type-checks the plugin and runs tests. It does not build with the BB CLI, install or reload the plugin, run live agents, upload archives or publish releases.
+
+## Historical baseline
+
+Before localization, the initial source preparation was checked on Windows with Node.js 24.22.1, npm 11.19.1 and BB 0.48.0. Type checking, 42 tests, a development build and a clean production-dependency build passed. The initial GitHub Actions run also passed. These are historical results, not verification of later local changes.
+
+The original development README and older verification notes remain in ignored local files. Current verification results should distinguish local checks, live BB checks and checks run on the published revision.

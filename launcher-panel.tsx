@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
+import { useTranslation } from "./use-translation";
 
 const storageKey = "bb-dashboard:launcher-layout:v1";
 const defaultWidth = 208;
@@ -19,18 +20,31 @@ function readLayout(): { open: boolean; width: number } {
 
 // Layout belongs to this browser, independently of the shared launcher entries.
 export function useLauncherPanel() {
+  const { t: tr } = useTranslation();
   const [layout, setLayout] = useState(readLayout);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [compactOpen, setCompactOpen] = useState(false);
+  const [compactWidth, setCompactWidth] = useState<number | null>(null);
   const [resizing, setResizing] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const drag = useRef<{ id: number; startX: number; startWidth: number } | null>(null);
   const panelId = useId();
+  const compact = containerWidth > 0 && containerWidth <= 680;
+  const open = compact ? compactOpen : layout.open;
   const upperBound = containerWidth > 0
     ? Math.min(maxWidth, Math.max(0, containerWidth - (containerWidth <= 680 ? 44 : 320))) : maxWidth;
   const lowerBound = Math.min(minWidth, upperBound);
-  const width = Math.min(upperBound, Math.max(lowerBound, layout.width));
+  const width = Math.min(upperBound, Math.max(lowerBound, compact ? compactWidth ?? layout.width : layout.width));
+
+  useEffect(() => {
+    // Narrow-screen interactions must not overwrite the desktop layout.
+    setCompactOpen(false);
+    setCompactWidth(null);
+    if (compact && panel.current?.contains(document.activeElement)) toggle.current?.focus();
+    finishResize();
+  }, [compact]);
 
   useEffect(() => {
     if (!root.current) return;
@@ -57,10 +71,13 @@ export function useLauncherPanel() {
   function close() {
     if (panel.current?.contains(document.activeElement)) toggle.current?.focus();
     finishResize();
-    setLayout(previous => ({ ...previous, open: false }));
+    if (compact) setCompactOpen(false);
+    else setLayout(previous => ({ ...previous, open: false }));
   }
   function setWidth(next: number) {
-    setLayout(previous => ({ ...previous, width: Math.round(Math.min(upperBound, Math.max(lowerBound, next))) }));
+    const bounded = Math.round(Math.min(upperBound, Math.max(lowerBound, next)));
+    if (compact) setCompactWidth(bounded);
+    else setLayout(previous => ({ ...previous, width: bounded }));
   }
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || !event.isPrimary) return;
@@ -86,18 +103,18 @@ export function useLauncherPanel() {
     setWidth(next);
   }
   return {
-    root, panel, toggle, panelId, open: layout.open, resizing, close, compact: containerWidth > 0 && containerWidth <= 680,
-    toggleOpen: () => layout.open ? close() : setLayout(previous => ({ ...previous, open: true })),
+    root, panel, toggle, panelId, open, resizing, close, compact, overlayOpen: compact && compactOpen,
+    toggleOpen: () => open ? close() : compact ? setCompactOpen(true) : setLayout(previous => ({ ...previous, open: true })),
     style: { "--db-launcher-width": `${width}px` } as CSSProperties,
     onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "Escape" && layout.open && !event.defaultPrevented) { event.preventDefault(); close(); }
+      if (event.key === "Escape" && open && !event.defaultPrevented) { event.preventDefault(); close(); }
     },
     resizeProps: {
-      role: "separator", tabIndex: layout.open ? 0 : -1,
-      "aria-label": "Ширина панели приложений", "aria-orientation": "vertical" as const,
+      role: "separator", tabIndex: open ? 0 : -1,
+      "aria-label": tr("panelWidth"), "aria-orientation": "vertical" as const,
       "aria-controls": panelId, "aria-valuemin": lowerBound, "aria-valuemax": upperBound,
-      "aria-valuenow": width, "aria-valuetext": `${width} пикселей`,
-      title: "Перетащите для изменения ширины. Стрелки ← → — с клавиатуры.",
+      "aria-valuenow": width, "aria-valuetext": tr("pixels", { count: width }),
+      title: tr("resizeHelp"),
       onPointerDown, onPointerMove, onPointerUp: onPointerEnd, onPointerCancel: onPointerEnd,
       onLostPointerCapture: finishResize, onKeyDown: onResizeKeyDown,
     },
