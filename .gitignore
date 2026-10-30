@@ -1,0 +1,41 @@
+dist/
+node_modules/
+
+# Local configuration, credentials and runtime data
+.env
+.env.*
+!.env.example
+.npmrc
+.secrets/
+secrets/
+*.pem
+*.key
+*.pfx
+*.p12
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+logs/
+*.log
+
+# Generated archives, reports and machine-local verification notes
+*.zip
+*.tgz
+.download-check-*
+coverage/
+test-results/
+verification/
+docs/local/
+*-verification.md
+
+# Editor and agent workspace state
+.idea/
+.vscode/
+.bb/
+.codex/
+.agents/
+.DS_Store
+Thumbs.db
