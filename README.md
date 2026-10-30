@@ -4,6 +4,10 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
+![BBDesk with four fictional projects, application shortcuts, live thread indicators, an active conversation with two subagents, conversation history, and tabs showing working, action needed, queued, new reply, error and read states.](docs/images/bbdesk-overview.png)
+
+Demonstration with fictional English projects and conversations. The workspace uses BBDesk's current components; chat content is illustrative. [What the preview shows](docs/SHOWCASE.md).
+
 ## Features
 
 - Choose projects to follow and switch between them.
