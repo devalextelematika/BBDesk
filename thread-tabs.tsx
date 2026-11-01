@@ -3,10 +3,16 @@ import { ThreadIndicator } from "./components/thread-indicator";
 import { useTranslation } from "./use-translation";
 import { Icon } from "./components/ui/icon";
 import { UndoTabButton } from "./undo-tab";
+import { startThreadDrag } from "./split-layout";
 
-export interface ThreadTab { id: string; title: string; detail: string; tone: string; status: string; canHide: boolean }
+export interface ThreadTab { id: string; createdAt?: number | null; title: string; detail: string; tone: string; status: string; canHide: boolean }
 
-export function ThreadTabs({ threads, activeId, onSelect, onHide, saving, leadingAction, children, undo, onUndo, onUndoPauseChange }: {
+export function compareThreadCreation(a: { id: string; createdAt?: number | null }, b: { id: string; createdAt?: number | null }) {
+  return (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id);
+}
+
+export function ThreadTabs({ threads, projectId, splitIds, onOpenBeside, activeId, onSelect, onHide, saving, leadingAction, children, undo, onUndo, onUndoPauseChange }: {
+  projectId: string; splitIds: string[]; onOpenBeside: (id: string) => void;
   threads: ThreadTab[]; activeId: string | null; onSelect: (id: string) => void; onHide: (id: string) => Promise<boolean>; saving: boolean; leadingAction?: ReactNode; children?: ReactNode;
   undo?: ThreadTab; onUndo: () => void; onUndoPauseChange: (paused: boolean) => void;
 }) {
@@ -57,7 +63,7 @@ export function ThreadTabs({ threads, activeId, onSelect, onHide, saving, leadin
     return () => document.removeEventListener("pointerdown", close);
   }, [open]);
   const pending = undo && !threads.some(thread => thread.id === undo.id) ? undo : undefined;
-  const entries = pending ? [...threads, pending].sort((a, b) => a.id.localeCompare(b.id)) : threads;
+  const entries = pending ? [...threads, pending].sort(compareThreadCreation) : threads;
   const capacity = width ? Math.max(1, Math.floor((width - 132 - (leadingAction ? 36 : 0)) / 168)) : entries.length;
   const visible = pending && undoPlacement.current?.id === pending.id && undoPlacement.current.index < 0 && capacity <= threads.length
     ? threads.slice(0, capacity) : entries.slice(0, capacity);
@@ -69,6 +75,7 @@ export function ThreadTabs({ threads, activeId, onSelect, onHide, saving, leadin
     const reversedIndex = [...visible].reverse().findIndex(thread => thread !== pending);
     if (reversedIndex >= 0) visible[visible.length - 1 - reversedIndex] = selected;
   }
+  visible.sort(compareThreadCreation);
   const overflow = entries.filter(thread => !visible.includes(thread));
   function choose(id: string) { onSelect(id); setOpen(false); }
   return <div className="db-thread-dock" ref={root} data-measured-width={width} onKeyDown={event => {
@@ -78,8 +85,10 @@ export function ThreadTabs({ threads, activeId, onSelect, onHide, saving, leadin
     <div className="db-thread-tabs" role="tablist" aria-label={tr("projectThreads")}>
       {visible.map(thread => thread === pending ? <div key={thread.id} className="db-thread-tab-item" role="presentation" data-undo="true"><UndoTabButton title={thread.title} saving={saving} onUndo={onUndo} onPauseChange={onUndoPauseChange}/></div> : <div key={thread.id} className="db-thread-tab-item" role="presentation" data-selected={activeId === thread.id}><button type="button" role="tab" className="db-thread-tab"
         aria-selected={activeId === thread.id} aria-controls="db-thread-workspace" tabIndex={activeId === thread.id || !selected && thread === visible[0] ? 0 : -1}
-        title={`${thread.title} · ${thread.detail} · ${thread.status}`} aria-label={`${thread.title}: ${thread.status}`}
+        draggable onDragStart={event => startThreadDrag(event, projectId, thread.id)}
+        title={`${thread.title} · ${thread.detail} · ${thread.status} · ${tr("splitDragHelp")}`} aria-label={`${thread.title}: ${thread.status}`}
         onClick={() => choose(thread.id)} onKeyDown={event => {
+          if (event.altKey && event.key === "Enter") { event.preventDefault(); onOpenBeside(thread.id); return; }
           const navigable = visible.filter(row => row !== pending);
           const index = navigable.indexOf(thread);
           const next = event.key === "Home" ? 0 : event.key === "End" ? navigable.length - 1
@@ -87,7 +96,7 @@ export function ThreadTabs({ threads, activeId, onSelect, onHide, saving, leadin
           if (next < 0) return;
           event.preventDefault(); choose(navigable[next]!.id);
           root.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
-        }}><ThreadIndicator tone={thread.tone}/><span>{thread.title}</span></button>{hideControl(thread)}</div>)}
+        }}><ThreadIndicator tone={thread.tone}/><span>{thread.title}</span>{splitIds.length > 1 && splitIds.includes(thread.id) && <Icon name="Columns2" className="db-split-mark"/>}</button>{hideControl(thread)}</div>)}
     </div>
     {overflow.length > 0 && <button type="button" className="db-thread-more" ref={trigger} aria-expanded={open}
       aria-controls="db-thread-overflow" onClick={() => setOpen(!open)}>{tr("moreThreads", { count: overflow.length })}</button>}
@@ -96,7 +105,9 @@ export function ThreadTabs({ threads, activeId, onSelect, onHide, saving, leadin
       <div className="db-thread-overflow-list">{overflow.map(thread =>
         <div className="db-thread-overflow-item" key={thread.id} data-undo={thread === pending || undefined}>{thread === pending
           ? <UndoTabButton title={thread.title} saving={saving} onUndo={onUndo} onPauseChange={onUndoPauseChange}/>
-          : <><button type="button" onClick={() => { choose(thread.id); trigger.current?.focus(); }} title={thread.detail}>
+          : <><button type="button" draggable onDragStart={event => { startThreadDrag(event, projectId, thread.id); }}
+          onKeyDown={event => { if (event.altKey && event.key === "Enter") { event.preventDefault(); onOpenBeside(thread.id); setOpen(false); } }}
+          onClick={() => { choose(thread.id); trigger.current?.focus(); }} title={`${thread.detail} · ${tr("splitDragHelp")}`}>
           <ThreadIndicator tone={thread.tone}/><span>{thread.title}</span><small>{thread.status}</small>
         </button>{hideControl(thread)}</>}</div>)}</div>
     </section>}

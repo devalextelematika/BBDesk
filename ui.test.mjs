@@ -79,10 +79,10 @@ test("a pending file activation cannot open a preview after the chat unmounts", 
   await act(async () => { complete({ environmentId: "env-a" }); });
   assert.equal(slot.inspection.navigateCalls.length, 0);
 });
-afterEach(() => { cleanup(); window.localStorage.removeItem("bb-dashboard:launcher-layout:v1"); window.sessionStorage.clear(); });
+afterEach(() => { cleanup(); window.localStorage.removeItem("bb-dashboard:launcher-layout:v1"); window.sessionStorage.clear(); window.localStorage.removeItem("bb-dashboard:split-layout:v1"); });
 const project = { id: "p1", name: "Тестовый проект", isPersonal: false, href: "/projects/p1", settingsHref: "/projects/p1/settings" };
 const item = { id: "notes/home", pluginId: "notes", label: "Заметки", icon: { kind: "plugin", pluginId: "notes", icon: null }, action: { kind: "plugin-panel", path: "home", pluginId: "notes" }, isDisabled: false, isLoading: false, isVisible: true, shortcut: null, badge: null };
-function mount({ connected = false, launcher = [], threads = [], hiddenIds = [], draftThreadIds = [], projects = [project], sdk = {}, navigationItems = [item], withNavigation = true, language = "ru", rpcOverrides = {}, threadStatus = "ready" } = {}) {
+function mount({ connected = false, launcher = [], threads = [], hiddenIds = [], draftThreadIds = [], projects = [project], sdk = {}, navigationItems = [item], withNavigation = true, language = "ru", rpcOverrides = {}, threadStatus = "ready", providers = undefined } = {}) {
   // Existing regression scenarios explicitly exercise Russian. null omits the preference.
   const languageSettings = language === null ? {} : { language };
   let snapshot = { config: { projects: connected ? projects.map(p => ({ id: p.id, enabled: true, connectedAt: 100 })) : [], launcher }, tracked: threads.map(t => ({ id: t.id, projectId: t.projectId, visible: !hiddenIds.includes(t.id), latestAttentionAt: t.latestAttentionAt, hiddenAttentionAt: hiddenIds.includes(t.id) ? t.latestAttentionAt : 0 })), syncError: null, syncedAt: 150 };
@@ -93,6 +93,7 @@ function mount({ connected = false, launcher = [], threads = [], hiddenIds = [],
     pluginId: "dashboard",
     settings: languageSettings,
     sidebarThreads: { status: threadStatus, projects, threads },
+    providers,
     sidebarDraftThreadIds: draftThreadIds,
     // Pages have no sidebar navigation context in BB. Only the bridge above does.
     sdk: { subscribe: () => () => {}, ...sdk },
@@ -192,6 +193,57 @@ test("cancelled and external application drags preserve order; handles support k
   fireEvent.click(slot.getByRole("button", { name: "Cancel" }));
   fireEvent.click(slot.getByRole("button", { name: "Configure applications" }));
   assert.deepEqual(rows().map(row => row.querySelector("input").value), ["Alpha", "Beta"]);
+});
+
+test("project settings reorder by drag, keyboard and buttons, save tab order and cancel draft changes", async () => {
+  const projects = [project, { ...project, id: "p2", name: "Second project" }, { ...project, id: "p3", name: "Third project" }];
+  const slot = mount({ connected: true, language: "en", projects });
+  const open = () => fireEvent.click(within(slot.container.querySelector(".db-project-bar")).getByRole("button", { name: "Select projects" }));
+  await slot.findByRole("button", { name: "Select projects" });
+  open();
+  const rows = () => [...slot.container.querySelectorAll(".db-edit-project")];
+  const names = () => rows().map(row => row.querySelector(".db-project-name").textContent);
+  const transfer = { setData() {}, setDragImage() {} };
+  const previousDragEvent = window.DragEvent;
+  window.DragEvent = window.MouseEvent;
+  try {
+    function drag(from, to, after) {
+      const source = rows()[from].querySelector(".db-project-drag");
+      const target = rows()[to];
+      target.getBoundingClientRect = () => ({ top: 10, height: 30 });
+      fireEvent.dragStart(source, { dataTransfer: transfer });
+      fireEvent.dragOver(target, { dataTransfer: transfer, clientY: after ? 39 : 11 });
+      assert.equal(target.dataset.drop, after ? "after" : "before");
+      fireEvent.drop(target, { dataTransfer: transfer, clientY: after ? 39 : 11 });
+      fireEvent.dragEnd(source);
+    }
+    drag(0, 2, true);
+    assert.deepEqual(names(), [projects[1].name, projects[2].name, project.name]);
+    drag(2, 0, false);
+    assert.deepEqual(names(), projects.map(p => p.name));
+    const handle = rows()[0].querySelector(".db-project-drag");
+    fireEvent.dragStart(handle, { dataTransfer: transfer });
+    fireEvent.dragOver(rows()[1], { dataTransfer: transfer });
+    fireEvent.dragEnd(handle);
+    fireEvent.drop(rows()[1], { dataTransfer: transfer });
+    assert.deepEqual(names(), projects.map(p => p.name));
+    assert.equal(slot.container.querySelector("[data-drop], [data-dragging]"), null);
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    fireEvent.click(slot.getByRole("button", { name: `Move ${project.name} down` }));
+    assert.deepEqual(names(), [projects[1].name, projects[2].name, project.name]);
+    assert.ok(!slot.inspection.rpcCalls.some(call => call.method === "projects_set"));
+    fireEvent.click(slot.getByRole("button", { name: "Save" }));
+    await slot.findByText("Settings saved.");
+    assert.deepEqual(slot.inspection.rpcCalls.find(call => call.method === "projects_set").input.ids, ["p2", "p3", "p1"]);
+    assert.deepEqual([...slot.getAllByRole("tab")].filter(tab => tab.id.startsWith("db-project-tab")).map(tab => tab.textContent), [projects[1].name, projects[2].name, project.name]);
+    open();
+    assert.deepEqual(names(), [projects[1].name, projects[2].name, project.name]);
+    fireEvent.click(slot.getByRole("button", { name: "Remove Second project from the dashboard" }));
+    assert.equal(slot.getByRole("checkbox", { name: "Second project" }).checked, false);
+    fireEvent.click(slot.getByRole("button", { name: "Cancel" }));
+    open();
+    assert.deepEqual(names(), [projects[1].name, projects[2].name, project.name]);
+  } finally { window.DragEvent = previousDragEvent; }
 });
 
 test("a missing language preference uses English even with a Russian document language", async () => {
@@ -447,7 +499,7 @@ test("long application labels stay intact in the DOM and split remains an indepe
   assert.equal(slot.getByRole("button", { name: label, exact: true }).querySelector("button"), null);
   assert.ok(slot.getByRole("button", { name: `Открыть ${label} рядом` }));
 });
-test("thread rows render the restored Russian status and environment", async () => {
+test("thread heading renders Russian status with environment only in the tooltip", async () => {
   const slot = mount({ connected: true, threads: [{
     id: "t1", projectId: "p1", displayTitle: "Проверка русского треда", status: "idle", runtimeStatus: "idle",
     queuedWork: "none", hasPendingInteraction: false, isUnread: false, isHidden: false, isArchived: false,
@@ -456,7 +508,9 @@ test("thread rows render the restored Russian status and environment", async () 
   }] });
   await slot.findByTestId("bb-thread-chat");
   assert.ok(slot.getByText("Просмотрено"));
-  assert.ok(within(slot.container.querySelector(".db-thread-open")).getByText("Основное окружение"));
+  const heading = slot.container.querySelector(".db-thread-open");
+  assert.equal(within(heading).queryByText("Основное окружение"), null);
+  assert.ok(heading.title.includes("Основное окружение"));
   assert.ok(slot.getByRole("button", { name: "Убрать «Проверка русского треда» с рабочего стола" }));
 });
 const secondProject = { ...project, id: "p2", name: "Второй проект" };
@@ -479,14 +533,14 @@ test("previous threads use BB update order, show compact titles and keep the sel
   assert.equal(history.querySelectorAll(".db-history-thread .db-state, .db-history-thread svg").length, 0);
   assert.ok(history.querySelector(".db-conversation-meta time"));
   assert.deepEqual([...history.querySelectorAll(".db-thread-title")].map(el => el.textContent), previous.slice(2).reverse().map(t => t.displayTitle));
-  fireEvent.click(within(history).getByRole("button", { name: /Прошлый 11/ }));
+  fireEvent.click(within(history).getByRole("button", { name: "Прошлый 11", exact: true }));
   assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "old11");
   assert.equal(slot.container.querySelectorAll(".db-thread-indicator").length, 1);
   assert.equal(slot.container.querySelector(".db-project").getAttribute("data-single-chat"), "false");
-  fireEvent.click(within(history).getByRole("button", { name: /Прошлый 10/ }));
+  fireEvent.click(within(history).getByRole("button", { name: "Прошлый 10", exact: true }));
   assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "old10");
   const selectedChat = slot.getByTestId("bb-thread-chat");
-  fireEvent.click(within(history).getByRole("button", { name: /Прошлый 10/ }));
+  fireEvent.click(within(history).getByRole("button", { name: "Прошлый 10", exact: true }));
   assert.equal(slot.getByTestId("bb-thread-chat"), selectedChat);
   fireEvent.click(slot.getByRole("button", { name: "Скрыть прошлые треды" }));
   assert.equal(slot.queryByRole("region", { name: "Прошлые треды" }), null);
@@ -681,6 +735,43 @@ test("header opens a specific thread across projects despite filters and keeps s
   assert.equal(indicator.getAttribute("aria-pressed"), "true");
 });
 
+test("project tabs show one quiet provider icon for each distinct provider among open threads", async () => {
+  const slot = mount({
+    connected: true, language: "en", projects: [project, secondProject], hiddenIds: ["z"],
+    providers: { status: "ready", providers: [
+      { id: "claude", displayName: "Claude", logoUrl: "/logos/claude.svg", icon: { glyph: "Sparkle" }, strings: { iconTint: { light: "#111111", dark: "#eeeeee" } } },
+      { id: "codex", displayName: "Codex", logoUrl: null },
+      { id: "worker", displayName: "Worker", logoUrl: null },
+    ] },
+    threads: [
+      thread("b", "p1", "Beta", { providerId: "claude" }),
+      thread("a", "p1", "Alpha", { providerId: "codex" }),
+      thread("c", "p1", "Gamma", { providerId: "claude" }),
+      thread("sub", "p1", "Helper", { providerId: "worker", parentThreadId: "a", status: "active" }),
+      thread("done", "p1", "Finished helper", { providerId: "retired", parentThreadId: "a" }),
+      thread("z", "p1", "Hidden", { providerId: "ghost" }),
+      thread("other", "p2", "Elsewhere", { providerId: "codex" }),
+    ],
+  });
+  const tab = await slot.findByRole("tab", { name: /^Тестовый проект,/ });
+  const icons = [...tab.querySelectorAll(".db-project-provider")];
+  assert.deepEqual(icons.map(icon => icon.getAttribute("data-provider-id")), ["codex", "claude", "worker"]);
+  assert.equal(icons[0].parentElement.getAttribute("title"), "Codex: Alpha");
+  assert.equal(icons[1].parentElement.getAttribute("title"), "Claude: Beta, Gamma");
+  assert.equal(icons[1].getAttribute("data-provider-logo"), "/logos/claude.svg");
+  assert.equal(icons[1].getAttribute("data-provider-glyph"), "Sparkle");
+  assert.equal(icons[1].getAttribute("data-provider-kind"), "agent");
+  assert.equal(icons[0].getAttribute("aria-hidden"), "true");
+  assert.equal(tab.querySelectorAll(".db-dot").length, 4);
+  const name = tab.querySelector(".db-project-tab-name");
+  assert.equal(name.textContent, "Тестовый проект");
+  assert.ok(icons[0].compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.ok(name.compareDocumentPosition(tab.querySelector(".db-project-tab-states")) & Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.match(tab.getAttribute("aria-label"), /Alpha: Read \(Codex\).*Beta: Read \(Claude\).*Gamma: Read \(Claude\).*Helper: Subagent working \(Worker\)/);
+  assert.doesNotMatch(tab.getAttribute("aria-label"), /Finished helper|Hidden|Elsewhere/);
+  const second = slot.getByRole("tab", { name: /^Второй проект,/ });
+  assert.deepEqual([...second.querySelectorAll(".db-project-provider")].map(icon => icon.getAttribute("data-provider-id")), ["codex"]);
+});
 test("tabs expose live project status and support arrows, Home and End", async () => {
   const slot = mount({ connected: true, projects: [project, secondProject], threads: [thread("t1", "p1", "Работа", { status: "active" }), thread("t2", "p2", "Вопрос", { hasPendingInteraction: true })] });
   const first = await slot.findByRole("tab", { name: /^Тестовый проект, в работе: 1/ });
@@ -1067,8 +1158,178 @@ for (const action of ["switch project", "close composer", "open existing thread"
   if (action === "switch project") assert.equal(slot.getByRole("tab", { name: /^Второй проект,/ }).getAttribute("aria-selected"), "true");
 });
 
+function splitTransfer(projectId, threadId) {
+  const data = new Map([["application/x-bbdesk-thread", JSON.stringify({ projectId, threadId })]]);
+  return { types: [...data.keys()], getData: type => data.get(type) ?? "", setData: (type, value) => data.set(type, value) };
+}
+function dropSplit(slot, transfer) {
+  const previous = window.DragEvent;
+  window.DragEvent = window.MouseEvent;
+  try { fireEvent.drop(splitPanes(slot)[0], { dataTransfer: transfer, clientX: 40 }); }
+  finally { window.DragEvent = previous; }
+}
+const splitPanes = slot => [...slot.container.querySelectorAll(".db-split-pane")];
+const splitIds = slot => splitPanes(slot).map(node => node.dataset.threadId);
+
+test("split drag inserts columns, focuses duplicates and replaces only the active column on tab click", async () => {
+  const threads = [thread("a", "p1", "Alpha", { isUnread: true }), thread("b", "p1", "Beta"), thread("c", "p1", "Gamma"), thread("d", "p1", "Delta")];
+  const slot = mount({ connected: true, language: "en", threads });
+  const original = await slot.findByTestId("bb-thread-chat");
+  const beta = slot.getByRole("tab", { name: /^Beta:/ });
+  const transfer = splitTransfer("p1", "b");
+  fireEvent.dragStart(beta, { dataTransfer: transfer });
+  fireEvent.dragOver(splitPanes(slot)[0], { dataTransfer: transfer });
+  assert.ok(splitPanes(slot)[0].dataset.drop);
+  dropSplit(slot, transfer);
+  assert.deepEqual(splitIds(slot), ["a", "b"]);
+  assert.equal(slot.getAllByTestId("bb-thread-chat")[0], original);
+  fireEvent.keyDown(slot.getByRole("tab", { name: /^Gamma:/ }), { key: "Enter", altKey: true });
+  assert.deepEqual(splitIds(slot), ["a", "b", "c"]);
+  fireEvent.keyDown(beta, { key: "Enter", altKey: true });
+  assert.deepEqual(splitIds(slot), ["a", "b", "c"]);
+  assert.equal(splitPanes(slot)[1].dataset.active, "true");
+  const gammaChat = slot.getAllByTestId("bb-thread-chat")[2];
+  fireEvent.click(slot.getByRole("tab", { name: /^Delta:/ }));
+  assert.deepEqual(splitIds(slot), ["a", "d", "c"]);
+  assert.equal(slot.getAllByTestId("bb-thread-chat")[0], original);
+  assert.equal(slot.getAllByTestId("bb-thread-chat")[2], gammaChat);
+  fireEvent.click(slot.getByRole("button", { name: "Remove “Delta” from split view" }));
+  assert.deepEqual(splitIds(slot), ["a", "c"]);
+  fireEvent.click(slot.getByRole("button", { name: "Remove “Alpha” from split view" }));
+  assert.deepEqual(splitIds(slot), ["c"]);
+  assert.equal(slot.queryByRole("separator", { name: /Resize adjacent/ }), null);
+  assert.equal(slot.getByTestId("bb-thread-chat"), gammaChat);
+  assert.equal(slot.inspection.rpcCalls.filter(call => call.method === "thread_hide").length, 0);
+});
+
+test("history drag opens an untracked conversation alongside and removes its temporary tab on close", async () => {
+  const slot = mount({ connected: true, language: "en", threads: [thread("a", "p1", "Current"), thread("old", "p1", "Historical")], hiddenIds: ["old"] });
+  const original = await slot.findByTestId("bb-thread-chat");
+  fireEvent.click(slot.getByRole("button", { name: "Show last 10 threads" }));
+  const history = slot.getByRole("region", { name: "Previous threads" });
+  const source = within(history).getByRole("button", { name: "Historical", exact: true });
+  const transfer = splitTransfer("p1", "old");
+  fireEvent.dragStart(source, { dataTransfer: transfer });
+  dropSplit(slot, transfer);
+  assert.deepEqual(splitIds(slot), ["a", "old"]);
+  assert.equal(slot.getAllByTestId("bb-thread-chat")[0], original);
+  assert.ok(slot.getByRole("tab", { name: /^Historical:/ }));
+  fireEvent.click(slot.getByRole("button", { name: "Remove “Historical” from split view" }));
+  assert.deepEqual(splitIds(slot), ["a"]);
+  assert.equal(slot.queryByRole("tab", { name: /^Historical:/ }), null);
+  assert.ok(within(history).getByRole("button", { name: "Historical", exact: true }));
+  fireEvent.click(within(history).getByRole("button", { name: "Open Historical alongside" }));
+  assert.deepEqual(splitIds(slot), ["a", "old"]);
+});
+
+test("split resizing changes adjacent widths, supports equalization and survives project return and reload", async () => {
+  const threads = [thread("a", "p1", "Alpha"), thread("b", "p1", "Beta"), thread("c", "p2", "Other project")];
+  let slot = mount({ connected: true, language: "en", projects: [project, secondProject], threads });
+  await slot.findByTestId("bb-thread-chat");
+  fireEvent.keyDown(slot.getByRole("tab", { name: /^Beta:/ }), { key: "Enter", altKey: true });
+  const [left, right] = splitPanes(slot);
+  left.getBoundingClientRect = right.getBoundingClientRect = () => ({ width: 600 });
+  const separator = slot.getByRole("separator", { name: /Resize adjacent/ });
+  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  const memory = () => JSON.parse(window.localStorage.getItem("bb-dashboard:split-layout:v1")).p1;
+  assert.deepEqual(memory().sizes, { a: 616, b: 584 });
+  const previous = window.PointerEvent;
+  window.PointerEvent = window.MouseEvent;
+  separator.setPointerCapture = () => {};
+  try {
+    fireEvent.pointerDown(separator, { button: 0, clientX: 600 });
+    fireEvent.pointerMove(separator, { clientX: 800 });
+    fireEvent.pointerUp(separator);
+    assert.deepEqual(memory().sizes, { a: 800, b: 400 });
+  } finally { window.PointerEvent = previous; }
+  fireEvent.doubleClick(separator);
+  assert.deepEqual(memory().sizes, { a: 600, b: 600 });
+  fireEvent.click(slot.getByRole("tab", { name: /^Второй проект/ }));
+  assert.deepEqual(splitIds(slot), ["c"]);
+  fireEvent.click(slot.getByRole("tab", { name: /^Тестовый проект/ }));
+  assert.deepEqual(splitIds(slot), ["a", "b"]);
+  slot.lifecycle.unmount();
+  slot = mount({ connected: true, language: "en", projects: [project, secondProject], threads });
+  await slot.findAllByTestId("bb-thread-chat");
+  assert.deepEqual(splitIds(slot), ["a", "b"]);
+  assert.deepEqual(memory().sizes, { a: 600, b: 600 });
+});
+
+test("split ignores foreign and invalid drops and opens no duplicate native chat", async () => {
+  const slot = mount({ connected: true, language: "en", threads: [thread("a", "p1", "Alpha"), thread("b", "p1", "Beta")] });
+  await slot.findByTestId("bb-thread-chat");
+  for (const transfer of [splitTransfer("p2", "b"), splitTransfer("p1", "missing"), { types: ["text/plain"], getData: () => "b" }, { types: ["application/x-bbdesk-thread"], getData: () => "broken" }]) {
+    dropSplit(slot, transfer);
+    assert.deepEqual(splitIds(slot), ["a"]);
+  }
+  fireEvent.keyDown(slot.getByRole("tab", { name: /^Beta:/ }), { key: "Enter", altKey: true });
+  fireEvent.click(slot.getByRole("tab", { name: /^Alpha:/ }));
+  assert.deepEqual(splitIds(slot), ["a", "b"]);
+  assert.equal(slot.getAllByTestId("bb-thread-chat").length, 2);
+});
+
+test("history drag unlocks a compact workspace and closes the overlay only after drop", async () => {
+  const originalObserver = globalThis.ResizeObserver;
+  const callbacks = new Map();
+  globalThis.ResizeObserver = class { constructor(callback) { this.callback = callback; } observe(el) { callbacks.set(el, this.callback); } disconnect() {} };
+  try {
+    const slot = mount({ connected: true, language: "en", threads: [thread("a", "p1", "Current"), thread("old", "p1", "Historical")], hiddenIds: ["old"] });
+    await slot.findByTestId("bb-thread-chat");
+    const main = slot.container.querySelector('.db-main');
+    Object.defineProperty(main, "clientWidth", { value: 480 });
+    await act(async () => callbacks.get(main)());
+    fireEvent.click(slot.getByRole("button", { name: "Show last 10 threads" }));
+    const workspace = slot.container.querySelector('.db-thread-workspace');
+    assert.ok(workspace.hasAttribute('inert'));
+    const history = slot.getByRole("region", { name: "Previous threads" });
+    const transfer = splitTransfer("p1", "old");
+    fireEvent.dragStart(within(history).getByRole("button", { name: "Historical", exact: true }), { dataTransfer: transfer });
+    assert.equal(workspace.hasAttribute('inert'), false);
+    assert.ok(history.isConnected);
+    dropSplit(slot, transfer);
+    assert.deepEqual(splitIds(slot), ["a", "old"]);
+    assert.equal(slot.queryByRole("region", { name: "Previous threads" }), null);
+    assert.equal(workspace.hasAttribute('inert'), false);
+    fireEvent.click(slot.getByRole("button", { name: "Show last 10 threads" }));
+    assert.ok(workspace.hasAttribute('inert'));
+  } finally { if (originalObserver === undefined) delete globalThis.ResizeObserver; else globalThis.ResizeObserver = originalObserver; }
+});
+
+test("split closes unavailable columns and hiding the active tab keeps the remaining column selected", async () => {
+  const threads = [thread("a", "p1", "Alpha"), thread("b", "p1", "Beta"), thread("c", "p1", "Gamma")];
+  const slot = mount({ connected: true, language: "en", threads });
+  await slot.findByTestId("bb-thread-chat");
+  fireEvent.keyDown(slot.getByRole("tab", { name: /^Beta:/ }), { key: "Enter", altKey: true });
+  fireEvent.keyDown(slot.getByRole("tab", { name: /^Gamma:/ }), { key: "Enter", altKey: true });
+  fireEvent.click(slot.getByRole("button", { name: "Hide “Gamma” from the dashboard" }));
+  await slot.findByText("Thread hidden from the dashboard. A new reply or activity will bring it back.");
+  assert.deepEqual(splitIds(slot), ["a", "b"]);
+  assert.ok(slot.getByRole("tab", { name: /^Alpha:/, selected: true }));
+  threads[1] = { ...threads[1], isArchived: true };
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.deepEqual(splitIds(slot), ["a"]);
+  assert.equal(slot.queryByRole("separator", { name: /Resize adjacent/ }), null);
+  fireEvent.click(slot.container.querySelector('.db-thread-open'));
+  assert.equal(slot.queryByTestId("bb-thread-chat"), null);
+});
+
+test("split persistence validates saved layouts and tolerates unavailable browser storage", async () => {
+  const { readSplitLayouts, saveSplitLayouts } = await import("./split-layout.ts");
+  const key = "bb-dashboard:split-layout:v1";
+  window.localStorage.setItem(key, JSON.stringify({ p1: { ids: ["a", "b", "a"], active: "missing", sizes: { a: -2, b: "bad" } }, p2: { ids: [null] } }));
+  assert.deepEqual(readSplitLayouts(), { p1: { ids: ["a", "b"], active: "a", sizes: { a: 1, b: 1 } } });
+  window.localStorage.setItem(key, "broken");
+  assert.deepEqual(readSplitLayouts(), {});
+  const storage = Object.getOwnPropertyDescriptor(window, "localStorage");
+  Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
+  try {
+    assert.deepEqual(readSplitLayouts(), {});
+    assert.doesNotThrow(() => saveSplitLayouts({}));
+  } finally { Object.defineProperty(window, "localStorage", storage); }
+});
+
 test("bottom tabs switch chats, keep stable order on status updates and never collapse on repeated selection", async () => {
-  const threads = [thread("t2", "p1", "Second"), thread("t1", "p1", "First")];
+  const threads = [thread("t2", "p1", "Second", { createdAt: 100 }), thread("t1", "p1", "First", { createdAt: 200 })];
   const slot = mount({ connected: true, language: "en", threads });
   await slot.findByTestId("bb-thread-chat");
   const tabs = within(slot.getByRole("tablist", { name: "Project threads" }));
@@ -1085,6 +1346,22 @@ test("bottom tabs switch chats, keep stable order on status updates and never co
   fireEvent.keyDown(tabs.getByRole("tab", { name: /^Second:/ }), { key: "Home" });
   assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "t1");
   assert.equal(document.activeElement, tabs.getByRole("tab", { name: /^First:/ }));
+});
+
+test("bottom tabs show newest first and retain chronological neighbors and undo placement", async () => {
+  const threads = [thread("a", "p1", "Oldest", { createdAt: 100 }), thread("b", "p1", "Middle", { createdAt: 200 }), thread("c", "p1", "Newest", { createdAt: 300 })];
+  const slot = mount({ connected: true, language: "en", threads });
+  await slot.findByTestId("bb-thread-chat");
+  const tabs = within(slot.getByRole("tablist", { name: "Project threads" }));
+  assert.deepEqual(tabs.getAllByRole("tab").map(el => el.textContent), ["Newest", "Middle", "Oldest"]);
+  fireEvent.click(tabs.getByRole("tab", { name: /^Middle:/ }));
+  fireEvent.click(slot.getByRole("button", { name: "Hide “Middle” from the dashboard" }));
+  await slot.findByText("Thread hidden from the dashboard. A new reply or activity will bring it back.");
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "a");
+  assert.deepEqual([...slot.container.querySelectorAll('.db-thread-tabs .db-thread-tab-item')].map(el => el.textContent), ["Newest", "Middle", "Oldest"]);
+  fireEvent.click(slot.getByRole("button", { name: "Restore “Middle”" }));
+  await slot.findByText("Thread returned to the dashboard.");
+  assert.deepEqual(tabs.getAllByRole("tab").map(el => el.textContent), ["Newest", "Middle", "Oldest"]);
 });
 
 test("bottom tabs overflow responds to width and returns focus on Escape without a separate search", async () => {

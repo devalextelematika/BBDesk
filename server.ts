@@ -101,9 +101,10 @@ export default async function plugin(bb: BbPluginApi) {
       const known = new Set(projects.map(p => p.id));
       const selected = new Set(ids);
       if (ids.some(projectId => !known.has(projectId))) throw new Error("DASHBOARD_PROJECT_UNAVAILABLE");
-      const next = config.projects.map(p => ({ ...p, enabled: selected.has(p.id) }));
       const now = Date.now();
-      for (const projectId of selected) if (!next.some(p => p.id === projectId)) next.push({ id: projectId, enabled: true, connectedAt: now });
+      const previous = new Map(config.projects.map(project => [project.id, project]));
+      const next = [...selected].map(id => ({ id, enabled: true, connectedAt: previous.get(id)?.connectedAt ?? now }));
+      next.push(...config.projects.filter(project => !selected.has(project.id)).map(project => ({ ...project, enabled: false })));
       await saveConfig({ ...config, projects: next });
       await reconcileAll();
       return config;

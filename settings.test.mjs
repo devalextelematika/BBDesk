@@ -7,6 +7,27 @@ const listRow = (changes = {}) => ({ ...makeThreadResponse({ id: "t1", projectId
   latestAttentionAt: 200, queuedWork: "none", hasPendingInteraction: false, runtime: { displayStatus: "idle" },
   activity: { activeBackgroundAgentCount: 0, activeBackgroundCommandCount: 0, activeWorkflowCount: 0 }, ...changes });
 
+test("project order persists through reload while connection history and disabled projects survive", async () => {
+  let host = createFakePluginHost({ sdk: { projects: { list: async () => ["p1", "p2", "p3"].map(id => ({ id })) }, threads: { list: async () => [] } } });
+  try {
+    await host.bb.storage.kv.set("config-v1", { projects: [
+      { id: "p1", enabled: true, connectedAt: 100 },
+      { id: "p2", enabled: true, connectedAt: 200 },
+    ], launcher: [] });
+    await plugin(host.bb);
+    const saved = await host.harness.behavior.callRpc("projects_set", { ids: ["p2", "p3", "p2"] });
+    assert.deepEqual(saved.projects.map(p => p.id), ["p2", "p3", "p1"]);
+    assert.equal(saved.projects[0].connectedAt, 200);
+    assert.ok(saved.projects[1].connectedAt > 200);
+    assert.deepEqual(saved.projects[2], { id: "p1", enabled: false, connectedAt: 100 });
+    host = await host.harness.reload(plugin);
+    assert.deepEqual((await host.harness.behavior.callRpc("snapshot", null)).config, saved);
+    const restored = await host.harness.behavior.callRpc("projects_set", { ids: ["p1", "p2", "p3"] });
+    assert.deepEqual(restored.projects.map(p => p.id), ["p1", "p2", "p3"]);
+    assert.equal(restored.projects[0].connectedAt, 100);
+  } finally { await host.harness.lifecycle.dispose(); }
+});
+
 test("hide undo restores visibility, rejects stale tokens and never changes native thread execution", async () => {
   let row = listRow();
   const host = createFakePluginHost({ sdk: { threads: { list: async () => [row] } } });

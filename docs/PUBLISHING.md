@@ -34,16 +34,16 @@ Verify the installed plugin separately: English by default; both language choice
 
 Publication requires an explicit owner instruction. Local implementation does not authorize commits, pushes, tags, GitHub Releases or npm publication. For a future release, choose the next version, synchronize package.json and package-lock.json, and use a new semver tag. Never move a published tag.
 
-## Version 0.1.4
+## Version 0.1.5
 
-Version **0.1.4** has matching package and lockfile versions. `CHANGELOG.md` describes the changes since the 0.1.3 source baseline. The English GitHub Release title is **BBDesk v0.1.4**; its body is [docs/releases/v0.1.4.md](releases/v0.1.4.md).
+Version **0.1.5** has matching package and lockfile versions. `CHANGELOG.md` describes the changes since 0.1.4. The English GitHub Release title is **BBDesk v0.1.5**; its body is [docs/releases/v0.1.5.md](releases/v0.1.5.md).
 
 Before committing, include new source files and locale catalogs as well as changes to tracked files. Review `git status --short`, the staged diff and the checks on the exact revision to be published. Do not commit `node_modules`, `dist`, archives or local verification notes.
 
-Once publication is explicitly authorized, commit the reviewed source to the existing repository and push the intended branch. If a tagged release is requested, create a new `v0.1.4` tag on the tested commit and publish release notes from the changelog. The default-branch installation command in the README does not require a tag. A version-pinned installation after the tag is published is:
+Once publication is explicitly authorized, commit the reviewed source to the existing repository and push the intended branch. If a tagged release is requested, create a new `v0.1.5` tag on the tested commit and publish release notes from the changelog. The default-branch installation command in the README does not require a tag. A version-pinned installation after the tag is published is:
 
 ```sh
-bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.4
+bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.5
 ```
 
 Record the actual check results and any remaining live-UI checks in the release review. Keep detailed machine-specific logs under ignored `docs/local/` or outside the repository.

@@ -4,14 +4,19 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
+Drag a bottom thread tab or a conversation from the history panel into the workspace to open it alongside the current chat. Drop on the left or right half of a column to insert there. Drag the dividers to resize adjacent chats; arrow keys also resize and double-click equalizes widths. Click a column to activate it: bottom tabs replace only that column, or focus a chat already open beside it. Alt+Enter on a bottom tab and the history panel's Open alongside button provide keyboard alternatives. Close a column with its header X; this does not hide, archive or stop the thread. Layouts are remembered locally per project. Columns have a minimum width of 320px and scroll horizontally when necessary.
+
 ![BBDesk with four projects, application shortcuts, live thread indicators, an active conversation with two subagents, conversation history, and tabs showing working, action needed, queued, new reply, error and read states.](https://raw.githubusercontent.com/devalextelematika/BBDesk/main/docs/images/bbdesk-overview.png)
 
 [What the preview shows](docs/SHOWCASE.md).
 
 ## Features
 
-- Choose projects to follow and switch between them.
+- Choose projects to follow, reorder them in settings and switch between them. Drag a project handle or use its arrow controls, then Save; Cancel discards the draft order.
+- Identify each project's agent providers through icons beside its name, with provider and conversation details in tooltips.
 - Read and continue threads directly in the workspace.
+- Work with multiple conversations in resizable columns; layouts, active columns and widths are remembered in this browser per project.
+- Browse bottom conversation tabs from newest to oldest by creation time; status changes keep their order stable.
 - Open local file links from embedded chat in BB's native file preview on the conversation's host, including line locations.
 - Return to the last conversation in each project, including history, after switching projects or reloading the same browser tab.
 - Search all available non-archived project conversations by title or environment, including older conversations beyond the recent ten. Search keeps the current chat open until a result is selected; the attention filter applies to results.
@@ -63,7 +68,7 @@ Open **BBDesk** in BB navigation, choose projects and configure application shor
 
 If the launcher asks you to enable its navigation provider, choose **BBDesk** under **Settings → Appearance → Navigation**. It preserves BB's original rail and supplies the registered screens and native actions. Settings-only plugins do not provide launchable screens.
 
-Selected projects and application shortcuts are stored on the BB server and shared by its clients. The application panel's width and open state are stored separately in each browser.
+Selected projects, their order and application shortcuts are stored on the BB server and shared by its clients. The application panel's width and open state, and per-project split layouts, are stored separately in each browser.
 
 ## Interface language
 
@@ -93,6 +98,7 @@ Key files:
 - `server.ts`: RPC, native plugin settings and activity tracking.
 - `state.ts`: thread inclusion and hiding rules.
 - `app.tsx`: workspace, embedded chat and new-thread composer.
+- `split-layout.ts`, `split-workspace.tsx`: conversation columns, resizing and local layout persistence.
 - `launcher-navigation.tsx`: bridge to BB navigation.
 - `launcher-panel.tsx`: application panel layout and persistence.
 - `i18n.ts`, `locales/`, `use-translation.ts`: translation catalogs and language selection.
@@ -102,7 +108,7 @@ Keep the package name `bb-plugin-dashboard`: the `dashboard` ID, routes and stor
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-See the [changelog](CHANGELOG.md) for release changes. Installing from the GitHub URL follows the repository's default branch. To install version 0.1.4 explicitly, use `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.4`.
+See the [changelog](CHANGELOG.md) and [v0.1.5 release notes](docs/releases/v0.1.5.md) for release changes. Installing from the GitHub URL follows the repository's default branch. To install version 0.1.5 explicitly, use `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.5`.
 
 ## License
 
