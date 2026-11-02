@@ -4,6 +4,17 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
+## What's new in 0.1.6
+
+- **Shared pool:** Pin conversations from connected projects and work with them side by side in one view. Drag a conversation onto Shared pool or use its pin button in tabs, More or history. Pinning keeps your current project open.
+- **Arrange your pool:** Reorder its bottom tabs to reorder chat columns, resize them and return to the saved layout in the same browser. Each column shows its project. Removing a conversation from the pool does not hide, archive or stop it.
+- **Create in the pool:** Start a conversation with the pool's new-thread button; the created thread is pinned automatically.
+- **Common threads:** Connect BB's personal conversations outside projects through a separate checkbox in project settings and open them from their own tab.
+- **Control visibility:** Turn Shared pool off in project settings without losing its saved conversations. This setting is shared across clients; pool membership, order, active column and widths stay local to each browser.
+- **Project tab layout:** Wrapped project tabs use the full width below the first row, with Common threads, Shared pool and settings kept at the upper right. Narrow workspaces retain a single horizontally scrolling row.
+
+Pool conversations from disconnected projects remain listed as unavailable until removed. Archived threads, threads hidden in BB and subagents are excluded.
+
 Drag a bottom thread tab or a conversation from the history panel into the workspace to open it alongside the current chat. Drop on the left or right half of a column to insert there. Drag the dividers to resize adjacent chats; arrow keys also resize and double-click equalizes widths. Click a column to activate it: bottom tabs replace only that column, or focus a chat already open beside it. Alt+Enter on a bottom tab and the history panel's Open alongside button provide keyboard alternatives. Close a column with its header X; this does not hide, archive or stop the thread. Layouts are remembered locally per project. Columns have a minimum width of 320px and scroll horizontally when necessary.
 
 ![BBDesk with four projects, application shortcuts, live thread indicators, an active conversation with two subagents, conversation history, and tabs showing working, action needed, queued, new reply, error and read states.](https://raw.githubusercontent.com/devalextelematika/BBDesk/main/docs/images/bbdesk-overview.png)
@@ -68,7 +79,7 @@ Open **BBDesk** in BB navigation, choose projects and configure application shor
 
 If the launcher asks you to enable its navigation provider, choose **BBDesk** under **Settings → Appearance → Navigation**. It preserves BB's original rail and supplies the registered screens and native actions. Settings-only plugins do not provide launchable screens.
 
-Selected projects, their order and application shortcuts are stored on the BB server and shared by its clients. The application panel's width and open state, and per-project split layouts, are stored separately in each browser.
+Selected projects, their order, Shared pool visibility and application shortcuts are stored on the BB server and shared by its clients. The application panel's width and open state, per-project split layouts and the shared pool's conversations and layout are stored separately in each browser.
 
 ## Interface language
 
@@ -108,7 +119,7 @@ Keep the package name `bb-plugin-dashboard`: the `dashboard` ID, routes and stor
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-See the [changelog](CHANGELOG.md) and [v0.1.5 release notes](docs/releases/v0.1.5.md) for release changes. Installing from the GitHub URL follows the repository's default branch. To install version 0.1.5 explicitly, use `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.5`.
+See the [changelog](CHANGELOG.md) and [v0.1.6 release notes](docs/releases/v0.1.6.md) for release changes. Installing from the GitHub URL follows the repository's default branch. Install version 0.1.6 explicitly with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.6`.
 
 ## License
 

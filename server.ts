@@ -7,14 +7,15 @@ import { languageSetting } from "./i18n";
 const id = z.string().min(1).max(200);
 const projectSchema = z.object({ id, enabled: z.boolean(), connectedAt: z.number().nonnegative() });
 const configSchema = z.object({
-  projects: z.array(projectSchema).max(100),
+  projects: z.array(projectSchema).refine(projects => projects.filter(project => project.enabled).length <= 100, "At most 100 projects can be enabled"),
   launcher: z.array(z.object({ id, label: z.string().min(1).max(200) })).max(100),
+  sharedPool: z.boolean().default(true),
 });
 const trackedSchema = z.object({ id, projectId: id, visible: z.boolean(), latestAttentionAt: z.number(), hiddenAttentionAt: z.number() });
 export type DashboardConfig = z.infer<typeof configSchema>;
 export const rpcContract = defineRpcContract({
   snapshot: { input: z.null(), output: z.object({ config: configSchema, tracked: z.array(trackedSchema), syncError: z.string().nullable(), syncedAt: z.number().nullable() }) },
-  projects_set: { input: z.object({ ids: z.array(id).max(100) }), output: configSchema },
+  projects_set: { input: z.object({ ids: z.array(id).max(100), sharedPool: z.boolean().optional() }), output: configSchema },
   launcher_set: { input: z.object({ items: configSchema.shape.launcher }), output: configSchema },
   thread_hide: { input: z.object({ threadId: id }), output: z.object({ hidden: z.boolean(), undoToken: z.string().optional() }) },
   thread_restore: { input: z.object({ threadId: id, undoToken: z.string().min(1).max(200) }), output: z.object({ restored: z.boolean() }) },
@@ -23,7 +24,7 @@ export const rpcContract = defineRpcContract({
 export default async function plugin(bb: BbPluginApi) {
   bb.settings.define({ language: languageSetting });
   const stored = configSchema.safeParse(await bb.storage.kv.get("config-v1"));
-  let config: DashboardConfig = stored.success ? stored.data : { projects: [], launcher: [] };
+  let config: DashboardConfig = stored.success ? stored.data : { projects: [], launcher: [], sharedPool: true };
   const tracked = new Map<string, TrackedThread>();
   const undoTokens = new Map<string, string>();
   for (const key of await bb.storage.kv.list("thread:")) {
@@ -41,6 +42,7 @@ export default async function plugin(bb: BbPluginApi) {
   }
   function publish() { if (!disposed) bb.realtime.publish("dashboard-changed", {}); }
   async function saveConfig(next: DashboardConfig) {
+    next = configSchema.parse(next);
     await bb.storage.kv.set("config-v1", next);
     config = next;
     publish();
@@ -96,8 +98,8 @@ export default async function plugin(bb: BbPluginApi) {
       if (syncedAt === null || syncError !== null || Date.now() - syncedAt >= 60_000) await reconcileAll();
       return { config, tracked: [...tracked.values()].filter(t => config.projects.some(p => p.id === t.projectId && p.enabled)), syncError, syncedAt };
     }),
-    projects_set: ({ ids }) => serial(async () => {
-      const projects = await bb.sdk.projects.list();
+    projects_set: ({ ids, sharedPool: showPool }) => serial(async () => {
+      const projects = await bb.sdk.projects.list({ includePersonal: true });
       const known = new Set(projects.map(p => p.id));
       const selected = new Set(ids);
       if (ids.some(projectId => !known.has(projectId))) throw new Error("DASHBOARD_PROJECT_UNAVAILABLE");
@@ -105,7 +107,7 @@ export default async function plugin(bb: BbPluginApi) {
       const previous = new Map(config.projects.map(project => [project.id, project]));
       const next = [...selected].map(id => ({ id, enabled: true, connectedAt: previous.get(id)?.connectedAt ?? now }));
       next.push(...config.projects.filter(project => !selected.has(project.id)).map(project => ({ ...project, enabled: false })));
-      await saveConfig({ ...config, projects: next });
+      await saveConfig({ ...config, projects: next, sharedPool: showPool ?? config.sharedPool });
       await reconcileAll();
       return config;
     }),

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6 — 2026-11-02
+
+- Pin conversations from connected projects into a Shared pool with native chats side by side. Add them by drag-and-drop or pin controls in tabs, More and history without leaving the current project.
+- Reorder pool tabs and columns, resize columns and remember membership, order, open view, active column and widths locally in each browser. Removing a pool column only unpins its thread.
+- Create a new conversation from the pool and pin it automatically.
+- Toggle Shared pool visibility in project settings without clearing saved pool conversations. The visibility preference is shared across clients.
+- Connect personal conversations outside projects through Common threads, with a separate settings checkbox and navigation tab.
+- Keep project navigation and the selected chat stable when a background hide request completes after navigation.
+- Apply the 100-project selection limit to enabled projects while retaining disconnected project history.
+- Let wrapped project tabs use the full width below the first row while keeping Common threads, Shared pool and settings at the upper right. Preserve the single scrolling row in narrow workspaces.
+
+Existing project, launcher and language settings are preserved. See the release notes for verification results and limits.
+
 ## 0.1.5 — 2026-11-01
 
 - Open multiple native conversations side by side by dragging a bottom tab, overflow entry or history conversation into the workspace. Alt+Enter on a tab and Open alongside in history offer keyboard alternatives.

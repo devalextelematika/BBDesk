@@ -7,6 +7,51 @@ const listRow = (changes = {}) => ({ ...makeThreadResponse({ id: "t1", projectId
   latestAttentionAt: 200, queuedWork: "none", hasPendingInteraction: false, runtime: { displayStatus: "idle" },
   activity: { activeBackgroundAgentCount: 0, activeBackgroundCommandCount: 0, activeWorkflowCount: 0 }, ...changes });
 
+test("more than 100 lifetime projects survive save, snapshot and reload with connection history", async () => {
+  const ids = Array.from({ length: 101 }, (_, i) => `p${i}`);
+  let host = createFakePluginHost({ sdk: { projects: { list: async () => ids.map(id => ({ id })) }, threads: { list: async () => [] } } });
+  try {
+    await plugin(host.bb);
+    const initial = await host.harness.behavior.callRpc("projects_set", { ids: ids.slice(0, 100) });
+    const saved = await host.harness.behavior.callRpc("projects_set", { ids: [ids[100]] });
+    assert.equal(saved.projects.length, 101);
+    assert.equal(saved.projects.filter(project => project.enabled).length, 1);
+    assert.deepEqual((await host.harness.behavior.callRpc("snapshot", null)).config, saved);
+    host = await host.harness.reload(plugin);
+    assert.deepEqual((await host.harness.behavior.callRpc("snapshot", null)).config, saved);
+    const reconnected = await host.harness.behavior.callRpc("projects_set", { ids: [ids[0]] });
+    assert.equal(reconnected.projects[0].connectedAt, initial.projects[0].connectedAt);
+    assert.equal(reconnected.projects.length, 101);
+  } finally { await host.harness.lifecycle.dispose(); }
+});
+
+test("previously persisted oversized project history is recovered without resetting launcher or pool settings", async () => {
+  const host = createFakePluginHost({ sdk: { threads: { list: async () => [] } } });
+  const config = { projects: Array.from({ length: 101 }, (_, i) => ({ id: `p${i}`, enabled: i === 100, connectedAt: i + 1 })), launcher: [{ id: "notes/home", label: "Notes" }], sharedPool: false };
+  try {
+    await host.bb.storage.kv.set("config-v1", config);
+    await plugin(host.bb);
+    assert.deepEqual((await host.harness.behavior.callRpc("snapshot", null)).config, config);
+  } finally { await host.harness.lifecycle.dispose(); }
+});
+
+test("invalid project selection and failed persistence leave the active configuration unchanged", async () => {
+  const ids = Array.from({ length: 101 }, (_, i) => `p${i}`);
+  const host = createFakePluginHost({ sdk: { projects: { list: async () => ids.map(id => ({ id })) }, threads: { list: async () => [] } } });
+  try {
+    await plugin(host.bb);
+    const saved = await host.harness.behavior.callRpc("projects_set", { ids: [ids[0]] });
+    await assert.rejects(host.harness.behavior.callRpc("projects_set", { ids }));
+    await assert.rejects(host.harness.behavior.callRpc("projects_set", { ids: ["missing"] }));
+    const set = host.bb.storage.kv.set.bind(host.bb.storage.kv);
+    host.bb.storage.kv.set = async () => { throw new Error("disk unavailable"); };
+    await assert.rejects(host.harness.behavior.callRpc("projects_set", { ids: [ids[1]] }), /disk unavailable/);
+    host.bb.storage.kv.set = set;
+    assert.deepEqual(await host.bb.storage.kv.get("config-v1"), saved);
+    assert.deepEqual((await host.harness.behavior.callRpc("snapshot", null)).config, saved);
+  } finally { await host.harness.lifecycle.dispose(); }
+});
+
 test("project order persists through reload while connection history and disabled projects survive", async () => {
   let host = createFakePluginHost({ sdk: { projects: { list: async () => ["p1", "p2", "p3"].map(id => ({ id })) }, threads: { list: async () => [] } } });
   try {
@@ -25,6 +70,36 @@ test("project order persists through reload while connection history and disable
     const restored = await host.harness.behavior.callRpc("projects_set", { ids: ["p1", "p2", "p3"] });
     assert.deepEqual(restored.projects.map(p => p.id), ["p1", "p2", "p3"]);
     assert.equal(restored.projects[0].connectedAt, 100);
+  } finally { await host.harness.lifecycle.dispose(); }
+});
+
+test("shared pool visibility persists with project selection and stays on for older settings", async () => {
+  let host = createFakePluginHost({ sdk: { projects: { list: async () => [{ id: "p1" }] }, threads: { list: async () => [] } } });
+  try {
+    await host.bb.storage.kv.set("config-v1", { projects: [{ id: "p1", enabled: true, connectedAt: 100 }], launcher: [] });
+    await plugin(host.bb);
+    assert.equal((await host.harness.behavior.callRpc("snapshot", null)).config.sharedPool, true);
+    const hidden = await host.harness.behavior.callRpc("projects_set", { ids: ["p1"], sharedPool: false });
+    assert.equal(hidden.sharedPool, false);
+    host = await host.harness.reload(plugin);
+    assert.equal((await host.harness.behavior.callRpc("snapshot", null)).config.sharedPool, false);
+    const kept = await host.harness.behavior.callRpc("projects_set", { ids: ["p1"] });
+    assert.equal(kept.sharedPool, false);
+  } finally { await host.harness.lifecycle.dispose(); }
+});
+
+test("common threads connect through the personal project and unknown projects stay rejected", async () => {
+  const host = createFakePluginHost({ sdk: {
+    projects: { list: async args => (args?.includePersonal ? ["p1", "home"] : ["p1"]).map(id => ({ id })) },
+    threads: { list: async () => [] },
+  } });
+  try {
+    await plugin(host.bb);
+    const saved = await host.harness.behavior.callRpc("projects_set", { ids: ["home", "p1"] });
+    assert.deepEqual(saved.projects.map(project => project.id), ["home", "p1"]);
+    assert.ok(saved.projects.every(project => project.enabled));
+    assert.ok(host.harness.inspection.sdk.calls.some(call => call.path === "projects.list" && call.args[0]?.includePersonal === true));
+    await assert.rejects(host.harness.behavior.callRpc("projects_set", { ids: ["missing"] }), /DASHBOARD_PROJECT_UNAVAILABLE/);
   } finally { await host.harness.lifecycle.dispose(); }
 });
 

@@ -79,7 +79,7 @@ test("a pending file activation cannot open a preview after the chat unmounts", 
   await act(async () => { complete({ environmentId: "env-a" }); });
   assert.equal(slot.inspection.navigateCalls.length, 0);
 });
-afterEach(() => { cleanup(); window.localStorage.removeItem("bb-dashboard:launcher-layout:v1"); window.sessionStorage.clear(); window.localStorage.removeItem("bb-dashboard:split-layout:v1"); });
+afterEach(() => { cleanup(); window.localStorage.removeItem("bb-dashboard:launcher-layout:v1"); window.sessionStorage.clear(); window.localStorage.removeItem("bb-dashboard:split-layout:v1"); window.localStorage.removeItem("bb-dashboard:shared-pool:v1"); });
 const project = { id: "p1", name: "Тестовый проект", isPersonal: false, href: "/projects/p1", settingsHref: "/projects/p1/settings" };
 const item = { id: "notes/home", pluginId: "notes", label: "Заметки", icon: { kind: "plugin", pluginId: "notes", icon: null }, action: { kind: "plugin-panel", path: "home", pluginId: "notes" }, isDisabled: false, isLoading: false, isVisible: true, shortcut: null, badge: null };
 function mount({ connected = false, launcher = [], threads = [], hiddenIds = [], draftThreadIds = [], projects = [project], sdk = {}, navigationItems = [item], withNavigation = true, language = "ru", rpcOverrides = {}, threadStatus = "ready", providers = undefined } = {}) {
@@ -99,7 +99,7 @@ function mount({ connected = false, launcher = [], threads = [], hiddenIds = [],
     sdk: { subscribe: () => () => {}, ...sdk },
     rpc: {
       snapshot: () => structuredClone(snapshot),
-      projects_set: ({ ids }) => { snapshot.config.projects = ids.map(id => ({ id, enabled: true, connectedAt: 100 })); return snapshot.config; },
+      projects_set: ({ ids, sharedPool }) => { snapshot.config.projects = ids.map(id => ({ id, enabled: true, connectedAt: 100 })); if (typeof sharedPool === "boolean") snapshot.config.sharedPool = sharedPool; return snapshot.config; },
       launcher_set: ({ items }) => { snapshot.config.launcher = items; return snapshot.config; },
       thread_hide: ({ threadId }) => {
         const row = snapshot.tracked.find(t => t.id === threadId);
@@ -122,6 +122,77 @@ function mount({ connected = false, launcher = [], threads = [], hiddenIds = [],
     await act(async () => slot.lifecycle.rerender(createElement(app.navPanels[0].component, { subPath: "" })));
   } });
 }
+for (const destination of ["project", "thread", "pool", "composer"]) test(`delayed split hide preserves newer navigation to ${destination}`, async () => {
+  window.localStorage.setItem("bb-dashboard:split-layout:v1", JSON.stringify({ p1: { ids: ["a", "b"], active: "a", sizes: {} } }));
+  let complete;
+  const slot = mount({ connected: true, language: "en", projects: [project, secondProject], threads: [thread("a", "p1", "Alpha"), thread("b", "p1", "Beta"), thread("other", "p2", "Other")],
+    rpcOverrides: { thread_hide: () => new Promise(resolve => { complete = resolve; }) } });
+  await slot.findAllByTestId("bb-thread-chat");
+  fireEvent.click(slot.getByRole("button", { name: "Hide “Alpha” from the dashboard" }));
+  if (destination === "project") fireEvent.click(slot.getByRole("tab", { name: new RegExp(`^${secondProject.name},`) }));
+  if (destination === "thread") fireEvent.click(slot.getByRole("tab", { name: /^Beta:/ }));
+  if (destination === "pool") fireEvent.click(slot.getByRole("button", { name: /^Shared pool/ }));
+  if (destination === "composer") fireEvent.click(within(slot.container.querySelector(".db-thread-dock")).getByRole("button", { name: /^New thread in project/ }));
+  await act(async () => { complete({ hidden: true, undoToken: "token" }); });
+  if (destination === "project") assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "other");
+  if (destination === "thread") {
+    assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "b");
+    assert.equal(slot.getByRole("tab", { name: /^Beta:/ }).getAttribute("aria-selected"), "true");
+  }
+  if (destination === "pool") assert.equal(slot.getByRole("button", { name: /^Shared pool/ }).getAttribute("aria-pressed"), "true");
+  if (destination === "composer") assert.ok(slot.getByTestId("bb-new-thread-composer"));
+  assert.deepEqual(JSON.parse(window.localStorage.getItem("bb-dashboard:split-layout:v1")).p1.ids, ["b"]);
+});
+
+test("failed delayed split hide preserves columns and the selected conversation", async () => {
+  window.localStorage.setItem("bb-dashboard:split-layout:v1", JSON.stringify({ p1: { ids: ["a", "b"], active: "a", sizes: {} } }));
+  let fail;
+  const slot = mount({ connected: true, language: "en", threads: [thread("a", "p1", "Alpha"), thread("b", "p1", "Beta")],
+    rpcOverrides: { thread_hide: () => new Promise((resolve, reject) => { fail = reject; }) } });
+  await slot.findAllByTestId("bb-thread-chat");
+  fireEvent.click(slot.getByRole("button", { name: "Hide “Alpha” from the dashboard" }));
+  await act(async () => { fail(new Error("offline")); });
+  assert.deepEqual(splitIds(slot), ["a", "b"]);
+  assert.equal(slot.getByRole("tab", { name: /^Alpha:/ }).getAttribute("aria-selected"), "true");
+});
+
+test("pool creation protection survives navigation, multiple creations and explicit unpinning", async () => {
+  const threads = [thread("alpha", "p1", "Alpha")];
+  let count = 0;
+  const slot = mount({ connected: true, language: "en", threads, sdk: { threads: { spawn: async () => ({ id: `created${++count}` }) } } });
+  await slot.findByTestId("bb-thread-chat");
+  for (let i = 1; i <= 2; i++) {
+    fireEvent.click(slot.getByRole("button", { name: "New thread in the shared pool" }));
+    await act(async () => { fireEvent.click(slot.getByTestId("bb-new-thread-composer-submit")); });
+    fireEvent.click(slot.getByRole("tab", { name: new RegExp(`^${project.name},`) }));
+  }
+  const entries = () => JSON.parse(window.localStorage.getItem("bb-dashboard:shared-pool:v1")).entries.map(entry => entry.threadId);
+  assert.deepEqual(entries(), ["created1", "created2"]);
+  fireEvent.click(slot.getByRole("button", { name: /^Shared pool/ }));
+  assert.deepEqual(splitIds(slot), ["created1", "created2"]);
+  assert.equal(slot.getAllByTestId("bb-thread-chat").length, 2);
+  fireEvent.click(within(splitPanes(slot)[0]).getByRole("button", { name: /^Remove/ }));
+  threads.push(thread("created1", "p1", "First created"), thread("created2", "p1", "Second created"));
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.deepEqual(entries(), ["created2"]);
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "created2");
+});
+
+test("late pool spawn keeps its pin without reopening the pool or replacing newer navigation", async () => {
+  let complete;
+  const slot = mount({ connected: true, language: "en", projects: [project, secondProject], threads: [thread("alpha", "p1", "Alpha"), thread("other", "p2", "Other")],
+    sdk: { threads: { spawn: () => new Promise(resolve => { complete = resolve; }) } } });
+  await slot.findByTestId("bb-thread-chat");
+  fireEvent.click(slot.getByRole("button", { name: "New thread in the shared pool" }));
+  fireEvent.click(slot.getByTestId("bb-new-thread-composer-submit"));
+  fireEvent.click(slot.getByRole("tab", { name: new RegExp(`^${secondProject.name},`) }));
+  await act(async () => { complete({ id: "created" }); });
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "other");
+  const pool = JSON.parse(window.localStorage.getItem("bb-dashboard:shared-pool:v1"));
+  assert.equal(pool.open, false);
+  assert.deepEqual(pool.entries, [{ projectId: "p1", threadId: "created" }]);
+});
+
 test("real page source renders Russian empty state and authored SVG controls", async () => {
   const slot = mount();
   await slot.findByText("Выберите проекты для работы");
@@ -440,6 +511,26 @@ test("project settings render in Russian and save the selected project", async (
   await slot.findByText("Настройки сохранены.");
   assert.ok(slot.inspection.rpcCalls.some(call => call.method === "projects_set" && call.input.ids[0] === "p1"));
   assert.ok(slot.getByText("Сейчас нет активных тредов. Можно создать новый."));
+});
+test("common threads connect from Dashboard projects like a project and keep a distinct checkbox", async () => {
+  const personal = { id: "home", name: "Personal", isPersonal: true, href: "/projects/home", settingsHref: "/projects/home/settings" };
+  const slot = mount({ language: "en", projects: [personal, project], threads: [thread("home-thread", "home", "Inbox")] });
+  await slot.findByText("Choose projects to follow");
+  fireEvent.click(within(slot.container.querySelector(".db-project-bar")).getByRole("button", { name: "Select projects", exact: true }));
+  const common = slot.getByRole("checkbox", { name: "Common threads" });
+  assert.equal(common.closest("label").className, "db-common-threads");
+  assert.equal(slot.queryByRole("checkbox", { name: "Personal" }), null);
+  assert.equal(slot.getByRole("checkbox", { name: "Тестовый проект" }).closest("label").classList.contains("db-common-threads"), false);
+  fireEvent.click(common);
+  fireEvent.click(slot.getByRole("checkbox", { name: "Тестовый проект" }));
+  fireEvent.click(slot.getByRole("button", { name: "Save", exact: true }));
+  const commonTab = await slot.findByRole("tab", { name: /^Common threads,/ });
+  assert.equal(commonTab.closest(".db-project-tab-wrap").classList.contains("db-common-threads"), true);
+  assert.ok(commonTab.closest(".db-project-tools"));
+  assert.equal(slot.getByRole("tab", { name: /^Тестовый проект,/ }).closest(".db-project-tools"), null);
+  assert.equal(slot.inspection.rpcCalls.find(call => call.method === "projects_set").input.ids[0], "home");
+  assert.equal(slot.queryByRole("tab", { name: /^Personal,/ }), null);
+  assert.ok(slot.getByRole("tab", { name: /^Inbox:/ }));
 });
 test("launcher main and adjacent-area controls issue separate native targets", async () => {
   const slot = mount({ launcher: [{ id: item.id, label: item.label }] });
@@ -1328,6 +1419,221 @@ test("split persistence validates saved layouts and tolerates unavailable browse
   } finally { Object.defineProperty(window, "localStorage", storage); }
 });
 
+function dropTransfer(node, transfer) {
+  const previous = window.DragEvent;
+  window.DragEvent = window.MouseEvent;
+  try { fireEvent.drop(node, { dataTransfer: transfer }); }
+  finally { window.DragEvent = previous; }
+}
+
+test("shared pool pins threads from several projects without changing a project split", async () => {
+  const threads = [
+    thread("alpha", "p1", "Alpha", { providerId: "claude" }),
+    thread("other", "p2", "Other", { providerId: "codex" }),
+    thread("old", "p1", "Historical"),
+    thread("sub", "p1", "Sub", { parentThreadId: "alpha" }),
+  ];
+  const slot = mount({
+    connected: true, language: "en", projects: [project, secondProject], threads, hiddenIds: ["old"],
+    providers: { status: "ready", providers: [
+      { id: "claude", displayName: "Claude", logoUrl: "/logos/claude.svg", icon: { glyph: "Sparkle" }, strings: { iconTint: { light: "#111111", dark: "#eeeeee" } } },
+      { id: "codex", displayName: "Codex", logoUrl: null },
+    ] },
+  });
+  await slot.findByTestId("bb-thread-chat");
+  const poolButton = () => slot.getByRole("button", { name: /^Shared pool/ });
+  fireEvent.click(slot.getByRole("button", { name: "Pin “Alpha” to the shared pool" }));
+  assert.equal(poolButton().getAttribute("aria-pressed"), "false");
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "alpha");
+  fireEvent.click(slot.getByRole("tab", { name: /^Второй проект/ }));
+  const transfer = splitTransfer("p2", "other");
+  fireEvent.dragStart(slot.getByRole("tab", { name: /^Other:/ }), { dataTransfer: transfer });
+  dropTransfer(poolButton(), transfer);
+  dropTransfer(poolButton(), splitTransfer("p1", "sub"));
+  const pool = poolButton();
+  const icons = [...pool.querySelectorAll(".db-project-provider")];
+  assert.deepEqual(icons.map(icon => icon.getAttribute("data-provider-id")), ["claude", "codex"]);
+  assert.equal(icons[0].parentElement.getAttribute("title"), "Claude: Alpha");
+  assert.equal(icons[1].parentElement.getAttribute("title"), "Codex: Other");
+  assert.equal(pool.querySelector(".db-project-tab-name").textContent, "Shared pool");
+  assert.equal(pool.querySelectorAll(".db-project-tab-states .db-dot").length, 2);
+  assert.ok(icons[0].compareDocumentPosition(pool.querySelector(".db-project-tab-name")) & Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.ok(pool.querySelector(".db-project-tab-name").compareDocumentPosition(pool.querySelector(".db-project-tab-states")) & Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.match(pool.getAttribute("aria-label"), /Shared pool, working: 0, need attention: 0, queued: 0, results: 2\. Alpha: Read \(Claude\); Other: Read \(Codex\)/);
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "other");
+  fireEvent.click(poolButton());
+  assert.equal(poolButton().getAttribute("aria-pressed"), "true");
+  assert.equal(slot.getByRole("tab", { name: /^Тестовый проект,/ }).getAttribute("aria-selected"), "false");
+  assert.deepEqual(splitIds(slot), ["alpha", "other"]);
+  const poolDock = slot.container.querySelector(".db-pool-workspace .db-thread-dock");
+  const remove = within(poolDock).getByRole("button", { name: "Remove “Alpha” from the shared pool" });
+  assert.equal(remove.querySelector("path").getAttribute("d"), "m6 6 12 12M18 6 6 18");
+  assert.equal(within(poolDock).getByRole("tab", { name: /^Тестовый проект · Alpha:/ }).querySelector("span:not(.db-dot)").textContent, "Тестовый проект · Alpha");
+  assert.deepEqual([...slot.container.querySelectorAll(".db-thread-project")].map(node => node.textContent), ["Тестовый проект", "Второй проект"]);
+  const otherPane = splitPanes(slot).find(pane => pane.dataset.threadId === "other");
+  fireEvent.click(within(otherPane).getByRole("button", { name: "Remove “Other” from the shared pool" }));
+  assert.deepEqual(splitIds(slot), ["alpha"]);
+  assert.equal(slot.inspection.rpcCalls.filter(call => call.method === "thread_hide").length, 0);
+  fireEvent.click(slot.getByRole("tab", { name: /^Тестовый проект,/ }));
+  assert.equal(poolButton().getAttribute("aria-pressed"), "false");
+  assert.deepEqual(splitIds(slot), ["alpha"]);
+  assert.equal(JSON.parse(window.localStorage.getItem("bb-dashboard:split-layout:v1")).p1, undefined);
+  fireEvent.click(slot.getByRole("button", { name: "Show last 10 threads" }));
+  fireEvent.click(within(slot.getByRole("region", { name: "Previous threads" })).getByRole("button", { name: "Pin “Historical” to the shared pool" }));
+  fireEvent.click(poolButton());
+  assert.deepEqual(splitIds(slot), ["alpha", "old"]);
+  assert.equal(slot.getAllByTestId("bb-thread-chat").map(node => node.dataset.threadId).sort().join(), "alpha,old");
+});
+
+test("shared pool can be hidden from Dashboard projects without forgetting its threads", async () => {
+  window.localStorage.setItem("bb-dashboard:shared-pool:v1", JSON.stringify({
+    open: true, active: "alpha", sizes: {}, entries: [{ projectId: "p1", threadId: "alpha" }],
+  }));
+  const slot = mount({ connected: true, language: "en", threads: [thread("alpha", "p1", "Alpha")] });
+  const openProjects = () => fireEvent.click(within(slot.container.querySelector(".db-project-bar")).getByRole("button", { name: "Select projects", exact: true }));
+  await slot.findByRole("button", { name: /^Shared pool/ });
+  openProjects();
+  const option = slot.getByRole("checkbox", { name: "Shared pool" });
+  assert.equal(option.checked, true);
+  assert.equal(option.closest("label").classList.contains("db-shared-pool-option"), true);
+  fireEvent.click(option);
+  fireEvent.click(slot.getByRole("button", { name: "Save", exact: true }));
+  await slot.findByText("Settings saved.");
+  await act(async () => {});
+  assert.equal(slot.queryByRole("button", { name: /^Shared pool/ }), null);
+  assert.equal(slot.queryByRole("button", { name: "New thread in the shared pool" }), null);
+  assert.deepEqual(JSON.parse(window.localStorage.getItem("bb-dashboard:shared-pool:v1")).entries, [{ projectId: "p1", threadId: "alpha" }]);
+  assert.equal(JSON.parse(window.localStorage.getItem("bb-dashboard:shared-pool:v1")).open, false);
+  openProjects();
+  fireEvent.click(slot.getByRole("checkbox", { name: "Shared pool" }));
+  fireEvent.click(slot.getByRole("button", { name: "Save", exact: true }));
+  await slot.findByRole("button", { name: /^Shared pool/ });
+  assert.equal(slot.inspection.rpcCalls.filter(call => call.method === "projects_set").map(call => call.input.sharedPool).join(), "false,true");
+});
+
+test("shared pool new thread stays in the pool and pins the created thread", async () => {
+  const slot = mount({
+    connected: true, language: "en", projects: [project, secondProject],
+    threads: [thread("alpha", "p1", "Alpha")],
+    sdk: { threads: { spawn: async () => ({ id: "created" }) } },
+  });
+  await slot.findByTestId("bb-thread-chat");
+  fireEvent.click(slot.getByRole("button", { name: "New thread in the shared pool" }));
+  assert.equal(slot.getAllByRole("button", { name: "New thread in the shared pool" }).length, 2);
+  assert.equal(slot.getByRole("button", { name: /^Shared pool/ }).getAttribute("aria-pressed"), "true");
+  assert.equal(slot.getByTestId("bb-new-thread-composer").dataset.defaultProjectId, "p1");
+  assert.equal(slot.queryByTestId("bb-thread-chat"), null);
+  await act(async () => { fireEvent.click(slot.getByTestId("bb-new-thread-composer-submit")); });
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "created");
+  assert.equal(slot.queryByTestId("bb-new-thread-composer"), null);
+  assert.equal(slot.getByRole("button", { name: /^Shared pool/ }).getAttribute("aria-pressed"), "true");
+  assert.deepEqual(JSON.parse(window.localStorage.getItem("bb-dashboard:shared-pool:v1")).entries, [{ projectId: "p1", threadId: "created" }]);
+  assert.deepEqual(JSON.parse(window.localStorage.getItem("bb-dashboard:split-layout:v1") ?? "{}"), {});
+});
+
+test("shared pool keeps a disabled project visible and drops archived threads", async () => {
+  window.localStorage.setItem("bb-dashboard:shared-pool:v1", JSON.stringify({
+    open: true, active: "a", sizes: { a: 3, b: 3 },
+    entries: [{ projectId: "p1", threadId: "a" }, { projectId: "p1", threadId: "b" }, { projectId: "gone", threadId: "missing" }],
+  }));
+  const threads = [thread("a", "p1", "Alpha"), thread("b", "p1", "Beta")];
+  let slot = mount({ connected: true, language: "en", threads });
+  await slot.findAllByTestId("bb-thread-chat");
+  assert.equal(slot.getAllByTestId("bb-thread-chat").length, 2);
+  assert.deepEqual(splitIds(slot), ["a", "b", "missing"]);
+  assert.ok(slot.getAllByText("Project unavailable").length);
+  assert.ok(slot.getByText("Check access to this project or disable it in dashboard settings."));
+  threads[1] = { ...threads[1], isArchived: true };
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.deepEqual(splitIds(slot), ["a", "missing"]);
+  slot.lifecycle.unmount();
+  slot = mount({ connected: true, language: "en", threads });
+  await slot.findByTestId("bb-thread-chat");
+  assert.deepEqual(splitIds(slot), ["a", "missing"]);
+  assert.equal(JSON.parse(window.localStorage.getItem("bb-dashboard:shared-pool:v1")).open, true);
+});
+
+test("shared pool persistence keeps valid pairs and ignores malformed storage", async () => {
+  const { readSharedPool, saveSharedPool, addPoolEntry, movePoolEntry, removePoolEntry } = await import("./split-layout.ts");
+  const key = "bb-dashboard:shared-pool:v1";
+  window.localStorage.setItem(key, JSON.stringify({
+    open: true, active: "missing", sizes: { a: 4, b: 0, c: "no" },
+    entries: [{ projectId: "p1", threadId: "a" }, { projectId: "p2", threadId: "a" }, { projectId: "", threadId: "b" }, null, { projectId: "p2", threadId: "c" }],
+  }));
+  assert.deepEqual(readSharedPool(), {
+    open: true, active: "a", sizes: { a: 4, c: 1 },
+    entries: [{ projectId: "p1", threadId: "a" }, { projectId: "p2", threadId: "c" }],
+  });
+  const added = addPoolEntry({ entries: [], active: "", sizes: {}, open: false }, { projectId: "p1", threadId: "a" });
+  assert.deepEqual(addPoolEntry(added, { projectId: "p9", threadId: "a" }).entries, [{ projectId: "p9", threadId: "a" }]);
+  assert.equal(removePoolEntry(added, "a").entries.length, 0);
+  const ordered = { open: true, active: "a", sizes: { a: 4, b: 2, c: 1 }, entries: [{ projectId: "p1", threadId: "a" }, { projectId: "p1", threadId: "b" }, { projectId: "p2", threadId: "c" }] };
+  assert.equal(movePoolEntry(ordered, "b", "b"), ordered);
+  assert.equal(movePoolEntry(ordered, "a", "b", false), ordered);
+  assert.equal(movePoolEntry(ordered, "missing", "a"), ordered);
+  const moved = movePoolEntry(ordered, "c", "a", false);
+  assert.deepEqual(moved.entries.map(entry => entry.threadId), ["c", "a", "b"]);
+  assert.equal(moved.active, "a");
+  assert.deepEqual(moved.sizes, ordered.sizes);
+  window.localStorage.setItem(key, "broken");
+  assert.deepEqual(readSharedPool(), { entries: [], active: "", sizes: {}, open: false });
+  const storage = Object.getOwnPropertyDescriptor(window, "localStorage");
+  Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
+  try {
+    assert.deepEqual(readSharedPool(), { entries: [], active: "", sizes: {}, open: false });
+    assert.doesNotThrow(() => saveSharedPool(added));
+  } finally { Object.defineProperty(window, "localStorage", storage); }
+});
+
+test("shared pool bottom tabs reorder the split columns", async () => {
+  window.localStorage.setItem("bb-dashboard:shared-pool:v1", JSON.stringify({
+    open: true, active: "alpha", sizes: { alpha: 4, other: 2, gamma: 1 },
+    entries: [
+      { projectId: "p1", threadId: "alpha" },
+      { projectId: "p2", threadId: "other" },
+      { projectId: "p1", threadId: "gamma" },
+    ],
+  }));
+  const slot = mount({
+    connected: true, language: "en", projects: [project, secondProject],
+    threads: [thread("alpha", "p1", "Alpha"), thread("other", "p2", "Other"), thread("gamma", "p1", "Gamma")],
+  });
+  await slot.findAllByTestId("bb-thread-chat");
+  const dock = () => slot.container.querySelector(".db-pool-workspace .db-thread-dock");
+  const tabs = () => within(dock()).getAllByRole("tab").map(tab => tab.textContent);
+  const alphaChat = slot.getAllByTestId("bb-thread-chat").find(node => node.dataset.threadId === "alpha");
+  assert.deepEqual(splitIds(slot), ["alpha", "other", "gamma"]);
+  assert.deepEqual(tabs(), ["Тестовый проект · Alpha", "Второй проект · Other", "Тестовый проект · Gamma"]);
+  function reorder(from, to, clientX) {
+    const item = within(dock()).getByRole("tab", { name: to }).closest(".db-thread-tab-item");
+    const source = within(dock()).getByRole("tab", { name: from });
+    item.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 32, right: 100, bottom: 32, x: 0, y: 0, toJSON() { return {}; } });
+    const transfer = splitTransfer("p1", "alpha");
+    const previous = window.DragEvent;
+    window.DragEvent = window.MouseEvent;
+    try {
+      fireEvent.dragStart(source, { dataTransfer: transfer });
+      fireEvent.dragOver(item, { dataTransfer: transfer, clientX });
+      assert.equal(item.dataset.drop, clientX >= 50 ? "after" : "before");
+      fireEvent.drop(item, { dataTransfer: transfer, clientX });
+      fireEvent.dragEnd(source);
+    } finally { window.DragEvent = previous; }
+  }
+  reorder(/^Тестовый проект · Alpha:/, /^Второй проект · Other:/, 10);
+  assert.deepEqual(splitIds(slot), ["alpha", "other", "gamma"]);
+  reorder(/^Тестовый проект · Gamma:/, /^Тестовый проект · Alpha:/, 10);
+  assert.deepEqual(splitIds(slot), ["gamma", "alpha", "other"]);
+  assert.deepEqual(tabs(), ["Тестовый проект · Gamma", "Тестовый проект · Alpha", "Второй проект · Other"]);
+  const stored = JSON.parse(window.localStorage.getItem("bb-dashboard:shared-pool:v1"));
+  assert.deepEqual(stored.entries.map(entry => entry.threadId), ["gamma", "alpha", "other"]);
+  assert.equal(stored.active, "alpha");
+  assert.deepEqual(stored.sizes, { alpha: 4, other: 2, gamma: 1 });
+  assert.equal(slot.getAllByTestId("bb-thread-chat").find(node => node.dataset.threadId === "alpha"), alphaChat);
+  assert.equal(splitPanes(slot).find(pane => pane.dataset.threadId === "alpha").dataset.active, "true");
+  reorder(/^Второй проект · Other:/, /^Тестовый проект · Gamma:/, 90);
+  assert.deepEqual(splitIds(slot), ["gamma", "other", "alpha"]);
+});
+
 test("bottom tabs switch chats, keep stable order on status updates and never collapse on repeated selection", async () => {
   const threads = [thread("t2", "p1", "Second", { createdAt: 100 }), thread("t1", "p1", "First", { createdAt: 200 })];
   const slot = mount({ connected: true, language: "en", threads });
@@ -1410,7 +1716,7 @@ test("closing an inactive bottom tab persists hiding without switching or remoun
   const slot = mount({ connected: true, language: "en", threads: [thread("t1", "p1", "Selected", { isUnread: true }), thread("t2", "p1", "Other")] });
   const chat = await slot.findByTestId("bb-thread-chat");
   const dock = slot.container.querySelector(".db-thread-dock");
-  fireEvent.click(within(dock).getByRole("button", { name: /Other/ }));
+  fireEvent.click(within(dock).getByRole("button", { name: "Hide “Other” from the dashboard" }));
   await slot.findByText("Thread hidden from the dashboard. A new reply or activity will bring it back.");
   assert.equal(slot.queryByRole("tab", { name: /^Other:/ }), null);
   assert.equal(slot.getByTestId("bb-thread-chat"), chat);

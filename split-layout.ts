@@ -39,3 +39,87 @@ export function selectSplitThread(layout: SplitLayout, id: string): SplitLayout 
   const ids = layout.ids.map(value => value === replaced ? id : value);
   return { ids, active: id, sizes: Object.fromEntries(ids.map(value => [value, layout.sizes[value === id ? replaced : value] ?? 1])) };
 }
+
+export type PoolEntry = { projectId: string; threadId: string };
+export type SharedPool = { entries: PoolEntry[]; active: string; sizes: Record<string, number>; open: boolean };
+const poolStorageKey = "bb-dashboard:shared-pool:v1";
+const emptyPool = (): SharedPool => ({ entries: [], active: "", sizes: {}, open: false });
+
+function validId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 200;
+}
+
+export function readThreadDrag(transfer: { getData(type: string): string }): PoolEntry | null {
+  try {
+    const data: unknown = JSON.parse(transfer.getData(threadDragType) || "null");
+    if (!data || typeof data !== "object") return null;
+    const entry = data as Partial<PoolEntry>;
+    return validId(entry.projectId) && validId(entry.threadId) ? { projectId: entry.projectId, threadId: entry.threadId } : null;
+  } catch { return null; }
+}
+
+export function readSharedPool(): SharedPool {
+  try {
+    const raw: unknown = JSON.parse(window.localStorage.getItem(poolStorageKey) ?? "null");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return emptyPool();
+    const row = raw as Partial<SharedPool>;
+    if (!Array.isArray(row.entries)) return emptyPool();
+    const entries: PoolEntry[] = [];
+    for (const entry of row.entries) {
+      if (!entry || typeof entry !== "object") continue;
+      const projectId = (entry as PoolEntry).projectId;
+      const threadId = (entry as PoolEntry).threadId;
+      if (!validId(projectId) || !validId(threadId) || entries.some(item => item.threadId === threadId)) continue;
+      entries.push({ projectId, threadId });
+      if (entries.length >= 50) break;
+    }
+    const sizes = Object.fromEntries(entries.map(entry => {
+      const size = row.sizes?.[entry.threadId];
+      return [entry.threadId, typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 1];
+    }));
+    return {
+      entries, sizes, open: row.open === true,
+      active: entries.some(entry => entry.threadId === row.active) ? row.active! : entries[0]?.threadId ?? "",
+    };
+  } catch { return emptyPool(); }
+}
+
+export function saveSharedPool(pool: SharedPool) {
+  try { window.localStorage.setItem(poolStorageKey, JSON.stringify(pool)); }
+  catch { /* Pinning and navigation also work with blocked browser storage. */ }
+}
+
+export function addPoolEntry(pool: SharedPool, entry: PoolEntry, target?: string, after = true): SharedPool {
+  if (!validId(entry.projectId) || !validId(entry.threadId)) return pool;
+  const existing = pool.entries.find(item => item.threadId === entry.threadId);
+  if (existing) {
+    const entries = pool.entries.map(item => item.threadId === entry.threadId ? { projectId: entry.projectId, threadId: entry.threadId } : item);
+    return { ...pool, entries, active: entry.threadId };
+  }
+  if (pool.entries.length >= 50) return pool;
+  const entries = [...pool.entries];
+  const index = target ? entries.findIndex(item => item.threadId === target) : entries.findIndex(item => item.threadId === pool.active);
+  entries.splice(index < 0 ? entries.length : index + Number(after), 0, { projectId: entry.projectId, threadId: entry.threadId });
+  return { ...pool, entries, active: entry.threadId, sizes: {} };
+}
+
+export function movePoolEntry(pool: SharedPool, threadId: string, targetId: string, after = true): SharedPool {
+  if (!validId(threadId) || !validId(targetId) || threadId === targetId) return pool;
+  const from = pool.entries.findIndex(item => item.threadId === threadId);
+  const target = pool.entries.findIndex(item => item.threadId === targetId);
+  if (from < 0 || target < 0) return pool;
+  const entries = [...pool.entries];
+  const [entry] = entries.splice(from, 1);
+  const nextTarget = entries.findIndex(item => item.threadId === targetId);
+  entries.splice(nextTarget + Number(after), 0, entry!);
+  if (entries.every((item, index) => item === pool.entries[index])) return pool;
+  return { ...pool, entries };
+}
+
+export function removePoolEntry(pool: SharedPool, threadId: string): SharedPool {
+  const index = pool.entries.findIndex(item => item.threadId === threadId);
+  if (index < 0) return pool;
+  const entries = pool.entries.filter(item => item.threadId !== threadId);
+  const active = pool.active === threadId ? entries[Math.min(index, entries.length - 1)]?.threadId ?? "" : pool.active;
+  return { ...pool, entries, active, sizes: Object.fromEntries(Object.entries(pool.sizes).filter(([id]) => id !== threadId)) };
+}

@@ -10,10 +10,12 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { Icon, type IconName } from "./components/ui/icon";
 import { ThreadIndicator } from "./components/thread-indicator";
-import { ProjectTabs } from "./project-tabs";
+import { ProjectTabs, SharedPoolButton } from "./project-tabs";
+
+const sharedPoolComposer = "shared-pool";
 import { ThreadTabs, compareThreadCreation, type ThreadTab } from "./thread-tabs";
 import { SplitWorkspace } from "./split-workspace";
-import { readSplitLayouts, saveSplitLayouts, selectSplitThread, startThreadDrag, threadDragType, type SplitLayouts } from "./split-layout";
+import { addPoolEntry, movePoolEntry, readSharedPool, readThreadDrag, removePoolEntry, saveSharedPool, readSplitLayouts, saveSplitLayouts, selectSplitThread, startThreadDrag, threadDragType, type SharedPool, type SplitLayouts } from "./split-layout";
 import { readWorkspaceMemory, saveWorkspaceMemory } from "./workspace-memory";
 import { ConversationMetadata, ConversationResults, type ConversationItem } from "./conversation-list";
 import { useUndoExpiry } from "./undo-tab";
@@ -50,8 +52,8 @@ function statusOf(t: Thread, tr: Translator) {
   return { text: tr("read"), tone: "read" };
 }
 function Empty({ children }: { children: ReactNode }) { return <div className="db-empty" role="status">{children}</div>; }
-function SmallButton({ label, icon, onClick, disabled = false }: { label: string; icon: IconName; onClick: () => void; disabled?: boolean }) {
-  return <button type="button" className="db-icon-btn" title={label} aria-label={label} onClick={onClick} disabled={disabled}><Icon name={icon} className="db-icon"/></button>;
+function SmallButton({ label, icon, onClick, disabled = false, pressed }: { label: string; icon: IconName; onClick: () => void; disabled?: boolean; pressed?: boolean }) {
+  return <button type="button" className="db-icon-btn" title={label} aria-label={label} aria-pressed={pressed} onClick={onClick} disabled={disabled}><Icon name={icon} className="db-icon"/></button>;
 }
 function ExpandedChat({ threadId, fillSpace = false }: { threadId: string; fillSpace?: boolean }) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -79,6 +81,8 @@ function DashboardPage() {
   const [workspaceMemory] = useState(readWorkspaceMemory);
   const [splitLayouts, setSplitLayouts] = useState<SplitLayouts>(readSplitLayouts);
   useEffect(() => saveSplitLayouts(splitLayouts), [splitLayouts]);
+  const [sharedPool, setSharedPool] = useState<SharedPool>(readSharedPool);
+  useEffect(() => saveSharedPool(sharedPool), [sharedPool]);
   const { t: tr, language, isLoading: languageLoading } = useTranslation();
   const launcherPanel = useLauncherPanel();
   const rpc = useRpc<typeof rpcContract>();
@@ -103,6 +107,7 @@ function DashboardPage() {
   const [historyOpened, setHistoryOpened] = useState<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
   const [pendingCreated, setPendingCreated] = useState<{ id: string; projectId: string } | null>(null);
+  const pendingPoolThreads = useRef(new Map<string, string>());
   const creationIntent = useRef<object | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(workspaceMemory.projectId);
   const [searchVisible, setSearchVisible] = useState(false);
@@ -135,6 +140,7 @@ function DashboardPage() {
   usePanelFocus(historyRef, historyProject, historyOpener);
   usePanelFocus(searchPanelRef, searchVisible && !settings, searchOpener, searchInputRef);
   const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const [poolEnabled, setPoolEnabled] = useState(true);
   const [launcherDraft, setLauncherDraft] = useState<DashboardConfig["launcher"]>([]);
   const draggedEntry = useRef<string | null>(null);
   const [entryDropTarget, setEntryDropTarget] = useState<{ id: string; after: boolean } | null>(null);
@@ -181,9 +187,11 @@ function DashboardPage() {
     && (trackedIds.has(t.id) || hasWork(activity(t)) || drafts.has(t.id) || opened === t.id
       || t.latestAttentionAt > (config?.projects.find(p => p.id === t.projectId)?.connectedAt ?? Infinity)
         && !data?.tracked.some(row => row.id === t.id && !row.visible && row.hiddenAttentionAt >= t.latestAttentionAt)));
+  const hideContext = useRef({ projectId: activeProject?.id, opened, historyOpened, creating, poolOpen: sharedPool.open, threads: allThreads, layouts: splitLayouts });
+  hideContext.current = { projectId: activeProject?.id, opened, historyOpened, creating, poolOpen: sharedPool.open, threads: allThreads, layouts: splitLayouts };
   useEffect(() => {
-    if (pendingCreated && current?.id === pendingCreated.id) setPendingCreated(null);
-  }, [pendingCreated, current]);
+    if (pendingCreated && (current?.id === pendingCreated.id || live.threads.some(t => t.id === pendingCreated.id && t.projectId === pendingCreated.projectId && !t.isHidden && !t.isArchived && !isSubagent(t)))) setPendingCreated(null);
+  }, [pendingCreated, current, live.threads]);
   useEffect(() => {
     if (live.status !== "ready" || !opened || current && !isFinishedSubagent(activity(current))) return;
     // Spawn can resolve before the sidebar's live view includes the new thread.
@@ -219,6 +227,32 @@ function DashboardPage() {
       return changed ? next : previous;
     });
   }, [data, live.status, live.threads, pendingCreated]);
+  const connectedIds = connected.map(project => project.id).join("\0");
+  useEffect(() => {
+    if (!data || live.status !== "ready") return;
+    const enabled = new Set(connectedIds ? connectedIds.split("\0") : []);
+    setSharedPool(previous => {
+      for (const [id, projectId] of pendingPoolThreads.current) {
+        if (!previous.entries.some(entry => entry.threadId === id && entry.projectId === projectId)
+          || live.threads.some(thread => thread.id === id && thread.projectId === projectId)) pendingPoolThreads.current.delete(id);
+      }
+      const entries = previous.entries.filter(entry => {
+        if (pendingPoolThreads.current.get(entry.threadId) === entry.projectId) return true;
+        if (!enabled.has(entry.projectId)) return true;
+        const thread = live.threads.find(candidate => candidate.id === entry.threadId && candidate.projectId === entry.projectId);
+        return !!thread && !thread.isHidden && !thread.isArchived && !isSubagent(thread);
+      });
+      if (entries.length === previous.entries.length && entries.every((entry, index) => entry === previous.entries[index])) return previous;
+      const active = entries.some(entry => entry.threadId === previous.active) ? previous.active : entries[0]?.threadId ?? "";
+      return { ...previous, entries, active, sizes: Object.fromEntries(Object.entries(previous.sizes).filter(([id]) => entries.some(entry => entry.threadId === id))) };
+    });
+  }, [data, live.status, live.threads, connectedIds, pendingCreated]);
+  const sharedPoolEnabled = config?.sharedPool !== false;
+  useEffect(() => {
+    if (sharedPoolEnabled) return;
+    setSharedPool(previous => previous.open ? { ...previous, open: false } : previous);
+    setCreating(current => current === sharedPoolComposer ? null : current);
+  }, [sharedPoolEnabled]);
   const runningCount = allThreads.filter(t => isWorking(activity(t))).length;
   function projectEntryThread(projectId: string) {
     const threads = allThreads.filter(t => t.projectId === projectId && !isSubagent(t)).sort(compareThreads);
@@ -284,6 +318,38 @@ function DashboardPage() {
     setSearchVisible(false); setSearch("");
     if (compactWorkspace) setHistoryProject(null);
   }
+  function eligiblePoolThread(projectId: string, threadId: string) {
+    return live.threads.find(t => t.id === threadId && t.projectId === projectId && !t.isArchived && !t.isHidden && !isSubagent(t) && connected.some(project => project.id === projectId)) ?? null;
+  }
+  function leavePool() {
+    setSharedPool(previous => previous.open ? { ...previous, open: false } : previous);
+  }
+  function showSharedPool() {
+    setHistoryProject(null); setSettings(null); setSearchVisible(false); setSearch("");
+    creationIntent.current = null; setCreating(null);
+    setSharedPool(previous => previous.open ? previous : { ...previous, open: true });
+  }
+  function togglePool(projectId: string, threadId: string) {
+    setSharedPool(previous => previous.entries.some(entry => entry.threadId === threadId) ? removePoolEntry(previous, threadId)
+      : eligiblePoolThread(projectId, threadId) ? addPoolEntry(previous, { projectId, threadId }) : previous);
+  }
+  function allowPoolDrop(event: DragEvent) {
+    if (!Array.from(event.dataTransfer.types).includes(threadDragType)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+  function dropOnPool(event: DragEvent) {
+    if (!Array.from(event.dataTransfer.types).includes(threadDragType)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const data = readThreadDrag(event.dataTransfer);
+    if (!data || !eligiblePoolThread(data.projectId, data.threadId)) return;
+    setSharedPool(previous => addPoolEntry(previous, data));
+  }
+  function addPoolFromDrop(projectId: string, threadId: string, target?: string, after = true) {
+    if (!eligiblePoolThread(projectId, threadId)) return;
+    setSharedPool(previous => addPoolEntry(previous, { projectId, threadId }, target, after));
+  }
   function removePane(id: string) {
     if (!activeProject) return;
     const layout = splitLayouts[activeProject.id];
@@ -295,6 +361,7 @@ function DashboardPage() {
     setSplitLayouts(previous => ({ ...previous, [activeProject.id]: { ...layout, ids, active: next ?? "" } }));
   }
   function openConversation(t: Thread) {
+    leavePool();
     if (allThreads.some(row => row.id === t.id)) openThread(t);
     else {
       creationIntent.current = null; setPendingCreated(null); setOpened(null); setCreating(null);
@@ -304,11 +371,15 @@ function DashboardPage() {
     setSearchVisible(false); setSearch("");
     if (compactWorkspace) setHistoryProject(null);
   }
+  function namedProject(projectId: string) {
+    const info = live.projects.find(project => project.id === projectId);
+    return info?.isPersonal ? tr("commonThreads") : info?.name ?? tr("projectUnavailable");
+  }
   const projectTabs = connected.map(project => {
     const info = live.projects.find(p => p.id === project.id);
     const threads = allThreads.filter(t => t.projectId === project.id);
     const states = threads.map(t => ({ id: t.id, title: t.displayTitle, subagent: isSubagent(t), providerId: t.providerId, ...statusOf(t, tr) }));
-    return { id: project.id, name: info?.name ?? tr("projectUnavailable"), available: !!info,
+    return { id: project.id, name: namedProject(project.id), common: !!info?.isPersonal, available: !!info,
       running: states.filter(state => state.tone === "running").length,
       attention: states.filter(state => state.tone === "attention").length,
       queued: threads.filter(t => t.queuedWork === "waiting").length,
@@ -316,12 +387,14 @@ function DashboardPage() {
       states };
   });
   function selectProject(id: string) {
+    leavePool();
     setHistoryProject(null); setHistoryOpened(null);
     creationIntent.current = null; setPendingCreated(null);
     enteredProject.current = id;
     setActiveProjectId(id); restoreProject(id); setCreating(null); setNotice("");
   }
   function openThread(t: Thread) {
+    leavePool();
     selectPane(t.projectId, t.id);
     setHistoryOpened(null);
     creationIntent.current = null; setPendingCreated(null);
@@ -329,9 +402,16 @@ function DashboardPage() {
     setActiveProjectId(t.projectId); setOpened(t.id); setCreating(null); setSettings(null); setNotice("");
   }
   function createInProject(id: string) {
+    leavePool();
     setHistoryProject(null); setHistoryOpened(null);
     creationIntent.current = {}; setPendingCreated(null);
     setActiveProjectId(id); setOpened(null); setCreating(id); setNotice("");
+  }
+  function createInPool() {
+    setHistoryProject(null); setHistoryOpened(null); setSettings(null); setSearchVisible(false); setSearch("");
+    creationIntent.current = {}; setPendingCreated(null);
+    setCreating(sharedPoolComposer); setNotice("");
+    setSharedPool(previous => previous.open ? previous : { ...previous, open: true });
   }
   function toggleThread(t: Thread) {
     if ((splitLayouts[t.projectId]?.ids.length ?? 0) > 1) { openConversation(t); return; }
@@ -350,6 +430,7 @@ function DashboardPage() {
     if (settings !== next) settingsOpener.current = document.activeElement as HTMLElement | null;
     setHistoryProject(null);
     setSelectedProjects(config.projects.filter(p => p.enabled).map(p => p.id));
+    setPoolEnabled(config.sharedPool !== false);
     setLauncherDraft(config.launcher.map(item => ({ ...item })));
     setSettings(settings === next ? null : next);
 
@@ -357,7 +438,7 @@ function DashboardPage() {
   async function saveSettings() {
     setSaving(true); setError(null);
     try {
-      if (settings === "projects") await rpc.call("projects_set", { ids: selectedProjects });
+      if (settings === "projects") await rpc.call("projects_set", { ids: selectedProjects, sharedPool: poolEnabled });
       else await rpc.call("launcher_set", { items: launcherDraft });
       await refresh(); setSettings(null); setNotice("settingsSaved");
     } catch (cause) { report(cause); }
@@ -367,25 +448,29 @@ function DashboardPage() {
     setSaving(true);
     try {
       const result = await rpc.call("thread_hide", { threadId: t.id });
+      if (!mounted.current) return result.hidden;
       if (!result.hidden) throw new Error("DASHBOARD_THREAD_UNAVAILABLE");
+      const context = hideContext.current;
       setSplitLayouts(previous => {
         const layout = previous[t.projectId];
         if (!layout?.ids.includes(t.id)) return previous;
         const ids = layout.ids.filter(id => id !== t.id);
         return { ...previous, [t.projectId]: { ...layout, ids, active: layout.active === t.id ? ids[0] ?? "" : layout.active } };
       });
-      const projectThreads = allThreads.filter(thread => thread.projectId === t.projectId && !isSubagent(thread)).sort(compareThreadCreation);
+      const projectThreads = context.threads.filter(thread => thread.projectId === t.projectId && !isSubagent(thread)).sort(compareThreadCreation);
       const index = projectThreads.findIndex(thread => thread.id === t.id);
       const next = projectThreads[index + 1] ?? projectThreads[index - 1];
       if (workspaceMemory.conversations[t.projectId]?.id === t.id) delete workspaceMemory.conversations[t.projectId];
-      const layout = splitLayouts[t.projectId];
+      const layout = context.layouts[t.projectId];
       const remaining = layout?.ids.filter(id => id !== t.id) ?? [];
-      if (layout?.active === t.id && remaining.length) {
-        const replacement = remaining[0]!;
-        const historical = !allThreads.some(thread => thread.id === replacement);
-        setOpened(historical ? null : replacement);
-        setHistoryOpened(historical ? replacement : null);
-      } else setOpened(currentId => currentId === t.id ? next?.id ?? null : currentId);
+      if (context.projectId === t.projectId && !context.poolOpen && !context.creating && (context.historyOpened ?? context.opened) === t.id) {
+        if (layout?.active === t.id && remaining.length) {
+          const replacement = remaining[0]!;
+          const historical = !context.threads.some(thread => thread.id === replacement);
+          setOpened(historical ? null : replacement);
+          setHistoryOpened(historical ? replacement : null);
+        } else setOpened(currentId => currentId === t.id ? next?.id ?? null : currentId);
+      }
       setUndoHide(result.undoToken ? { id: t.id, projectId: t.projectId, token: result.undoToken,
         tab: { id: t.id, createdAt: t.createdAt, title: t.displayTitle, detail: t.environment?.name ?? "", tone: "read", status: tr("read"), canHide: false } } : null);
       await refresh(); setNotice("threadHidden");
@@ -456,7 +541,11 @@ function DashboardPage() {
           <div className="db-settings-heading"><h3>{settings === "projects" ? tr("dashboardProjects") : tr("panelApps")}</h3><SmallButton label={tr("closeSettings")} icon="X" onClick={() => setSettings(null)} disabled={saving}/></div>
           <div className="db-settings-body">
           <p className="db-muted">{settings === "projects" ? tr("projectsHelp") : tr("appsHelp")}</p>
-          <div className="db-checks">{settings === "projects" ? live.projects.filter(p => !p.isPersonal).map(project => <label key={project.id}><input type="checkbox" disabled={saving} checked={selectedProjects.includes(project.id)} onChange={e => setSelectedProjects(e.target.checked ? [...selectedProjects, project.id] : selectedProjects.filter(id => id !== project.id))}/>{project.name}</label>) : apps.map(item => <label key={item.id}><input type="checkbox" disabled={saving} checked={launcherDraft.some(entry => entry.id === item.id)} onChange={e => setLauncherDraft(e.target.checked ? [...launcherDraft, { id: item.id, label: item.label }] : launcherDraft.filter(entry => entry.id !== item.id))}/><NavigationIcon icon={item.icon} className="db-icon"/>{item.label}</label>)}</div>
+          <div className="db-checks">{settings === "projects" ? <>
+            {live.projects.filter(project => project.isPersonal).map(project => <label className="db-common-threads" key={project.id}><input type="checkbox" disabled={saving} checked={selectedProjects.includes(project.id)} onChange={e => setSelectedProjects(e.target.checked ? [...selectedProjects, project.id] : selectedProjects.filter(id => id !== project.id))}/>{tr("commonThreads")}</label>)}
+            <label className="db-shared-pool-option"><input type="checkbox" disabled={saving} checked={poolEnabled} onChange={e => setPoolEnabled(e.target.checked)}/>{tr("sharedPool")}</label>
+            {live.projects.filter(project => !project.isPersonal).map(project => <label key={project.id}><input type="checkbox" disabled={saving} checked={selectedProjects.includes(project.id)} onChange={e => setSelectedProjects(e.target.checked ? [...selectedProjects, project.id] : selectedProjects.filter(id => id !== project.id))}/>{project.name}</label>)}
+          </> : apps.map(item => <label key={item.id}><input type="checkbox" disabled={saving} checked={launcherDraft.some(entry => entry.id === item.id)} onChange={e => setLauncherDraft(e.target.checked ? [...launcherDraft, { id: item.id, label: item.label }] : launcherDraft.filter(entry => entry.id !== item.id))}/><NavigationIcon icon={item.icon} className="db-icon"/>{item.label}</label>)}</div>
           {settings === "launcher" && !navigation && <p className="db-muted">{tr("navigationHelp")}</p>}
           {settings === "launcher" && navigation && apps.length === 0 && <p className="db-muted">{tr("noApps")}</p>}
           {settings === "launcher" && launcherDraft.map((entry, index) => <div
@@ -495,9 +584,10 @@ function DashboardPage() {
             ><Icon name="GripVertical" className="db-icon"/></button>
             <label className="db-sr" htmlFor={`app-${index}`}>{tr("appName")} {index + 1}</label><input id={`app-${index}`} className="db-input" maxLength={200} value={entry.label} disabled={saving} onChange={e => setLauncherDraft(launcherDraft.map((row, i) => i === index ? { ...row, label: e.target.value } : row))}/><SmallButton label={tr("moveAppUp", { name: entry.label })} icon="ArrowUp" disabled={saving || index === 0} onClick={() => moveApp(index, -1)}/><SmallButton label={tr("moveAppDown", { name: entry.label })} icon="ArrowDown" disabled={saving || index === launcherDraft.length - 1} onClick={() => moveApp(index, 1)}/><SmallButton label={tr("removeApp", { name: entry.label })} icon="X" disabled={saving} onClick={() => setLauncherDraft(launcherDraft.filter(row => row.id !== entry.id))}/></div>)}
           {settings === "projects" && selectedProjects.map((id, index) => {
-            const entry = { id, label: live.projects.find(project => project.id === id)?.name ?? id };
+            const info = live.projects.find(project => project.id === id);
+            const entry = { id, label: info?.isPersonal ? tr("commonThreads") : info?.name ?? id };
             return <div
-            className="db-edit-app db-edit-project" key={entry.id}
+            className={`db-edit-app db-edit-project${info?.isPersonal ? " db-common-threads" : ""}`} key={entry.id}
             data-dragging={draggingEntry === entry.id || undefined}
             data-drop={entryDropTarget?.id === entry.id ? entryDropTarget.after ? "after" : "before" : undefined}
             onDragOver={event => {
@@ -536,6 +626,16 @@ function DashboardPage() {
           </div>
           <div className="db-settings-footer"><button type="button" className="db-button db-primary" disabled={saving || settings === "launcher" && launcherDraft.some(row => !row.label.trim())} onClick={() => void saveSettings()}>{saving ? tr("saving") : tr("save")}</button><button type="button" className="db-button" disabled={saving} onClick={() => setSettings(null)}>{tr("cancel")}</button></div>
         </section>;
+  const poolRows = sharedPool.entries.map(entry => {
+    const thread = live.threads.find(t => t.id === entry.threadId && t.projectId === entry.projectId);
+    const info = live.projects.find(project => project.id === entry.projectId);
+    const state = thread ? statusOf(thread, tr) : null;
+    const pending = pendingPoolThreads.current.get(entry.threadId) === entry.projectId;
+    return { id: entry.threadId, projectId: entry.projectId, projectConnected: connected.some(project => project.id === entry.projectId), thread, pending, title: thread?.displayTitle ?? (pending ? tr("openingThread") : tr("unavailable")), caption: info?.isPersonal ? tr("commonThreads") : info?.name ?? tr("projectUnavailable"), state };
+  });
+  const poolStates = poolRows.map(row => ({ id: row.id, title: row.title, text: row.state?.text ?? tr("projectUnavailable"), tone: row.state?.tone ?? "unknown", subagent: !!row.thread && isSubagent(row.thread), providerId: row.thread?.providerId }));
+  const poolQueued = poolRows.filter(row => row.thread?.queuedWork === "waiting").length;
+  const poolCreateProjectId = poolRows.find(row => row.id === (sharedPool.active || poolRows[0]?.id))?.projectId ?? activeProject?.id ?? connected[0]?.id ?? "";
   return <div ref={launcherPanel.root} className={`db-root${launcherPanel.resizing ? " db-resizing" : ""}`} lang={language} aria-busy={languageLoading || undefined} style={{ ...launcherPanel.style, visibility: languageLoading ? "hidden" : undefined }} onKeyDown={event => {
     if (event.defaultPrevented) return;
     if (event.key === "Escape") {
@@ -558,8 +658,8 @@ function DashboardPage() {
       <div className="db-thread-indicators" role="group" aria-label={tr("activitySummary", { working: runningCount, attention: attentionCount })}>
         {[...allThreads].sort((a, b) => a.id.localeCompare(b.id)).map(t => {
           const state = statusOf(t, tr);
-          const label = `${live.projects.find(project => project.id === t.projectId)?.name ?? tr("projectUnavailable")} · ${t.displayTitle}: ${state.text}`;
-          return <button key={t.id} type="button" className="db-thread-indicator" data-thread-id={t.id} title={label} aria-label={label} aria-pressed={opened === t.id} onClick={() => openThread(t)}><ThreadIndicator tone={state.tone} subagent={isSubagent(t)}/></button>;
+          const label = `${namedProject(t.projectId)} · ${t.displayTitle}: ${state.text}`;
+          return <button key={t.id} type="button" className="db-thread-indicator" data-thread-id={t.id} title={label} aria-label={label} aria-pressed={sharedPool.open ? sharedPool.active === t.id : opened === t.id} onClick={() => openThread(t)}><ThreadIndicator tone={state.tone} subagent={isSubagent(t)}/></button>;
         })}
       </div>
       <div className="db-header-tools">
@@ -596,15 +696,52 @@ function DashboardPage() {
       </div>
       <div className="db-launcher-backdrop" aria-hidden="true" onClick={launcherPanel.close}/>
       <main ref={mainRef} className="db-main" aria-label={tr("workspace")} data-compact-workspace={compactWorkspace}>
-        <div className="db-project-bar">
-          {data && connected.length > 0 && <ProjectTabs projects={projectTabs} activeId={activeProject?.id ?? null} onSelect={selectProject} onCreate={createInProject}/>}
-          <div className="db-project-tools"><SmallButton label={tr("selectProjects")} icon="Settings2" disabled={!data || saving} onClick={() => openSettings("projects")}/></div>
+        <div className="db-project-bar" data-shared-pool={sharedPool.open && sharedPoolEnabled || undefined}>
+          <div className="db-project-tools">{data && projectTabs.some(project => project.common) && <ProjectTabs projects={projectTabs.filter(project => project.common)} label={tr("commonThreads")} activeId={sharedPool.open ? null : activeProject?.id ?? null} onSelect={selectProject} onCreate={createInProject}/>}{data && connected.length > 0 && sharedPoolEnabled && <><SharedPoolButton name={tr("sharedPool")} help={tr("sharedPoolHelp")} pressed={sharedPool.open} drop={threadDragging} states={poolStates} queued={poolQueued} controls={sharedPool.open ? "db-shared-pool" : undefined} onClick={showSharedPool} onDragOver={allowPoolDrop} onDrop={dropOnPool}/><button type="button" className="db-tab-create db-icon-btn" title={tr("newThreadTitle", { name: tr("sharedPool") })} aria-label={tr("newThreadInPool")} onClick={createInPool}><Icon name="Plus" className="db-icon"/></button></>}<SmallButton label={tr("selectProjects")} icon="Settings2" disabled={!data || saving} onClick={() => openSettings("projects")}/></div>
+          {data && projectTabs.some(project => !project.common) && <ProjectTabs projects={projectTabs.filter(project => !project.common)} activeId={sharedPool.open ? null : activeProject?.id ?? null} onSelect={selectProject} onCreate={createInProject}/>}
         </div>
         {settings === "projects" && <div className="db-settings-popover db-project-settings">{settingsPanel}</div>}
         <div className="db-project-content">
         {(error || data?.syncError || live.status === "error") && <div className="db-error" role="alert"><span>{error ? tr(error) : tr("syncFailed")}</span><button type="button" className="db-button" onClick={() => void refresh()}>{tr("retry")}</button></div>}
         {connection !== "connected" && <div className="db-warning" role="status">{tr("connectionWarning")}</div>}
-        {!data || live.status === "loading" ? <Empty>{tr("loadingProjects")}</Empty> : connected.length === 0 ? <Empty><Icon name="FolderOpen" className="db-empty-icon"/><h3>{tr("chooseProjects")}</h3><p>{tr("chooseProjectsHelp")}</p><button type="button" className="db-button db-primary" onClick={() => openSettings("projects")}>{tr("selectProjects")}</button></Empty> : connected.map(projectConfig => {
+        {!data || live.status === "loading" ? <Empty>{tr("loadingProjects")}</Empty> : connected.length === 0 ? <Empty><Icon name="FolderOpen" className="db-empty-icon"/><h3>{tr("chooseProjects")}</h3><p>{tr("chooseProjectsHelp")}</p><button type="button" className="db-button db-primary" onClick={() => openSettings("projects")}>{tr("selectProjects")}</button></Empty> : sharedPool.open && sharedPoolEnabled ? <section className="db-project db-project-workspace db-pool-workspace" id="db-shared-pool" aria-label={tr("sharedPool")}>
+          <div className="db-thread-workspace" id="db-thread-workspace" onDragOver={allowPoolDrop} onDrop={dropOnPool}>
+            {creating === sharedPoolComposer && <div className="db-create"><div className="db-chat-heading"><strong>{tr("newThreadTitle", { name: tr("sharedPool") })}</strong><SmallButton label={tr("closeCreate")} icon="X" onClick={() => { creationIntent.current = null; setCreating(null); }}/></div><div className="db-new-composer"><NewThreadComposer key={sharedPoolComposer} defaultProjectId={poolCreateProjectId} draftKey="dashboard-new-shared-pool" placeholder={tr("promptPlaceholder")} layout="document" onSubmit={async request => {
+              const intent = creationIntent.current;
+              try {
+                const created = await sdk.threads.spawn(request);
+                if (mounted.current) {
+                  const show = intent === creationIntent.current;
+                  pendingPoolThreads.current.set(created.id, request.projectId);
+                  setSharedPool(previous => {
+                    const next = addPoolEntry(previous, { projectId: request.projectId, threadId: created.id });
+                    return show ? { ...next, open: true } : { ...next, active: previous.active || next.active };
+                  });
+                  if (show) {
+                    setPendingCreated({ id: created.id, projectId: request.projectId });
+                    setCreating(null); setNotice("threadCreated");
+                  }
+                }
+                void refresh();
+              } catch (cause) { report(cause); throw cause; }
+            }}/></div></div>}
+            {creating !== sharedPoolComposer && (poolRows.length > 0 ? <SplitWorkspace projectId="" crossProject ids={poolRows.map(row => row.id)} activeId={sharedPool.active || poolRows[0]!.id} sizes={sharedPool.sizes}
+              onActivate={id => setSharedPool(previous => previous.active === id ? previous : { ...previous, active: id })}
+              onAdd={(threadId, target, after, projectId) => { if (projectId) addPoolFromDrop(projectId, threadId, target, after); }}
+              onResize={sizes => setSharedPool(previous => ({ ...previous, sizes }))}
+              renderPane={id => {
+                const row = poolRows.find(item => item.id === id)!;
+                return <div className="db-thread" key={id}>
+                  <div className="db-thread-line" data-tone={row.state?.tone ?? "unknown"}><button type="button" className="db-thread-open" title={`${row.caption} · ${row.title}${row.state ? ` · ${row.state.text}` : ""}`} aria-expanded="true" aria-controls={`chat-${id}`} onClick={() => setSharedPool(previous => previous.active === id ? previous : { ...previous, active: id })}>
+                    <ThreadIndicator tone={row.state?.tone ?? "unknown"}/><span className="db-thread-text"><span className="db-thread-project">{row.caption}</span><span className="db-thread-title">{row.title}{row.thread && drafts.has(row.thread.id) && tr("draftSuffix")}</span></span>{row.state && <span className={`db-state ${row.state.tone}`}>{row.state.text}</span>}
+                  </button><SmallButton label={tr("removeFromPool", { name: row.title })} icon="X" onClick={() => setSharedPool(previous => removePoolEntry(previous, id))}/></div>
+                  {row.projectConnected && (row.thread || row.pending) ? <div className="db-chat" id={`chat-${id}`}><ExpandedChat threadId={id} fillSpace/></div> : <div className="db-project-empty">{tr("projectAccessHelp")}</div>}
+                </div>;
+              }}/> : <div className="db-project-empty">{tr("sharedPoolEmpty")}</div>)}
+          </div>
+          <ThreadTabs projectId="" preserveOrder poolRemoval onReorder={(threadId, targetId, after) => setSharedPool(previous => movePoolEntry(previous, threadId, targetId, after))} threadsLabel={tr("sharedPoolThreads")} splitIds={poolRows.map(row => row.id)} poolIds={poolRows.map(row => row.id)} onTogglePool={(threadId, projectId) => togglePool(projectId, threadId)} onOpenBeside={id => setSharedPool(previous => ({ ...previous, active: id }))} activeId={sharedPool.active || null} saving={saving} onUndo={() => undefined} onUndoPauseChange={() => undefined} onHide={async () => false} onSelect={id => setSharedPool(previous => previous.active === id ? previous : { ...previous, active: id })} threads={poolRows.map(row => ({ id: row.id, projectId: row.projectId, createdAt: row.thread?.createdAt, title: row.title, caption: row.caption, detail: row.thread?.environment?.name ?? row.thread?.environment?.branchName ?? row.thread?.host?.name ?? tr("environment"), tone: row.state?.tone ?? "unknown", status: row.state?.text ?? tr("unavailable"), canHide: false }))}
+            leadingAction={<button type="button" className="db-thread-create db-icon-btn" title={tr("newThreadTitle", { name: tr("sharedPool") })} aria-label={tr("newThreadInPool")} onClick={createInPool}><Icon name="Plus" className="db-icon"/></button>}/>
+        </section> : connected.map(projectConfig => {
           const project = live.projects.find(p => p.id === projectConfig.id);
           const active = projectConfig.id === activeProject?.id;
           if (!active) return <section key={projectConfig.id} id={`db-project-panel-${projectConfig.id}`} role="tabpanel" aria-labelledby={`db-project-tab-${projectConfig.id}`} hidden/>;
@@ -654,7 +791,7 @@ function DashboardPage() {
               }}/>}
             {!displayed && !paneThreads.length && !creating && !openingCreated && <div className="db-project-empty">{!project ? tr("projectAccessHelp") : filter === "attention" ? tr("noAttention") : hasSubagents ? tr("subagentsHelp") : rows.length ? tr("selectThread") : tr("noThreads")}</div>}
             </div>
-            <ThreadTabs key={projectConfig.id} projectId={projectConfig.id} splitIds={paneThreads.map(t => t.id)} onOpenBeside={addPane} activeId={paneThreads.length ? layout!.active : historyOpened ?? opened} saving={saving} undo={undoHide?.projectId === projectConfig.id ? undoHide.tab : undefined} onUndo={() => void restoreHidden()} onUndoPauseChange={setUndoPaused} onHide={async id => { const thread = rows.find(t => t.id === id); return thread ? hide(thread) : false; }} threads={rows.map(t => ({ id: t.id, createdAt: t.createdAt, title: t.displayTitle, detail: t.environment?.name ?? t.environment?.branchName ?? t.host?.name ?? tr("environment"), tone: statusOf(t, tr).tone, status: statusOf(t, tr).text, canHide: allThreads.some(row => row.id === t.id) && !hasWork(activity(t)) && !drafts.has(t.id) }))}
+            <ThreadTabs key={projectConfig.id} projectId={projectConfig.id} splitIds={paneThreads.map(t => t.id)} poolIds={sharedPool.entries.map(entry => entry.threadId)} onTogglePool={(threadId, projectId) => togglePool(projectId, threadId)} onOpenBeside={addPane} activeId={paneThreads.length ? layout!.active : historyOpened ?? opened} saving={saving} undo={undoHide?.projectId === projectConfig.id ? undoHide.tab : undefined} onUndo={() => void restoreHidden()} onUndoPauseChange={setUndoPaused} onHide={async id => { const thread = rows.find(t => t.id === id); return thread ? hide(thread) : false; }} threads={rows.map(t => ({ id: t.id, createdAt: t.createdAt, title: t.displayTitle, detail: t.environment?.name ?? t.environment?.branchName ?? t.host?.name ?? tr("environment"), tone: statusOf(t, tr).tone, status: statusOf(t, tr).text, canHide: allThreads.some(row => row.id === t.id) && !hasWork(activity(t)) && !drafts.has(t.id) }))}
               leadingAction={<button type="button" className="db-thread-create db-icon-btn" disabled={!project}
                 title={tr("newThreadTitle", { name: project?.name ?? tr("projectUnavailable") })} aria-label={tr("newThreadInProject", { name: project?.name ?? tr("projectUnavailable") })}
                 onClick={() => createInProject(projectConfig.id)}><Icon name="Plus" className="db-icon"/></button>}
@@ -667,14 +804,14 @@ function DashboardPage() {
             {historyExpanded && compactWorkspace && <div className="db-history-backdrop" style={{ pointerEvents: threadDragging ? "none" : undefined }} aria-hidden="true" onClick={() => setHistoryProject(null)}/>}
             {historyExpanded && <div ref={historyRef} className="db-history" id={`db-history-${projectConfig.id}`} role="region" aria-label={tr("recentThreads")}>
               <div className="db-picker-heading"><span>{tr("recentThreads")}</span><SmallButton label={tr("closeHistory")} icon="X" onClick={() => setHistoryProject(null)}/></div>
-              {history.length === 0 ? <div className="db-project-empty">{tr("noRecentThreads")}</div> : history.map(t => <div className="db-history-entry" key={t.id}><button type="button" draggable onDragStart={event => startThreadDrag(event, projectConfig.id, t.id)} className="db-history-thread" aria-label={t.displayTitle} aria-pressed={historyOpened === t.id} aria-controls="db-thread-workspace" title={t.displayTitle} onClick={() => openConversation(t)}><span className="db-thread-title">{t.displayTitle}</span><ConversationMetadata item={conversationItem(t)}/></button><SmallButton label={tr("openAlongside", { name: t.displayTitle })} icon="Columns2" onClick={() => addPane(t.id)}/></div>)}
+              {history.length === 0 ? <div className="db-project-empty">{tr("noRecentThreads")}</div> : history.map(t => <div className="db-history-entry" key={t.id}><button type="button" draggable onDragStart={event => startThreadDrag(event, projectConfig.id, t.id)} className="db-history-thread" aria-label={t.displayTitle} aria-pressed={historyOpened === t.id} aria-controls="db-thread-workspace" title={t.displayTitle} onClick={() => openConversation(t)}><span className="db-thread-title">{t.displayTitle}</span><ConversationMetadata item={conversationItem(t)}/></button><SmallButton label={tr(sharedPool.entries.some(entry => entry.threadId === t.id) ? "removeFromPool" : "addToPool", { name: t.displayTitle })} icon="Pin" pressed={sharedPool.entries.some(entry => entry.threadId === t.id)} onClick={() => togglePool(projectConfig.id, t.id)}/><SmallButton label={tr("openAlongside", { name: t.displayTitle })} icon="Columns2" onClick={() => addPane(t.id)}/></div>)}
               {project && <a className="db-all-conversations" href={project.href}>{tr("allProjectThreads")}</a>}
             </div>}
           </section>;
         })}
         </div>
-        {searchVisible && !settings && activeProject && <section ref={searchPanelRef} className="db-search-results" role="region" aria-label={tr("searchInProject", { name: live.projects.find(p => p.id === activeProject.id)?.name ?? tr("projectUnavailable") })}>
-          <p className="db-search-scope">{tr("searchInProject", { name: live.projects.find(p => p.id === activeProject.id)?.name ?? tr("projectUnavailable") })} · {tr(filter === "attention" ? "attention" : "allThreads")}</p>
+        {searchVisible && !settings && activeProject && <section ref={searchPanelRef} className="db-search-results" role="region" aria-label={tr("searchInProject", { name: namedProject(activeProject.id) })}>
+          <p className="db-search-scope">{tr("searchInProject", { name: namedProject(activeProject.id) })} · {tr(filter === "attention" ? "attention" : "allThreads")}</p>
           <ConversationResults key={`${activeProject.id}:${search}:${filter}`} items={searchResults.map(conversationItem)} selectedId={historyOpened ?? opened} loading={!data || live.status === "loading"} failed={live.status === "error"}
             onSelect={id => { const thread = searchResults.find(t => t.id === id); if (thread) openConversation(thread); }}/>
         </section>}

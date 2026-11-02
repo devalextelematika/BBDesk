@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type DragEvent } from "react";
-import { threadDragType } from "./split-layout";
+import { readThreadDrag, threadDragType } from "./split-layout";
 import { useTranslation } from "./use-translation";
 
-export function SplitWorkspace({ ids, activeId, sizes, projectId, onActivate, onAdd, onResize, renderPane }: {
-  ids: string[]; activeId: string | null; sizes: Record<string, number>; projectId: string;
-  onActivate: (id: string) => void; onAdd: (id: string, target?: string, after?: boolean) => void;
+export function SplitWorkspace({ ids, activeId, sizes, projectId, crossProject = false, onActivate, onAdd, onResize, renderPane }: {
+  ids: string[]; activeId: string | null; sizes: Record<string, number>; projectId: string; crossProject?: boolean;
+  onActivate: (id: string) => void; onAdd: (id: string, target?: string, after?: boolean, projectId?: string) => void;
   onResize: (sizes: Record<string, number>) => void;
   renderPane: (id: string, split: boolean) => ReactNode;
 }) {
@@ -66,12 +66,10 @@ export function SplitWorkspace({ ids, activeId, sizes, projectId, onActivate, on
         onDropCapture={event => {
           if (!Array.from(event.dataTransfer.types).includes(threadDragType)) return;
           event.preventDefault(); event.stopPropagation(); finishDrag();
-          try {
-            const data = JSON.parse(event.dataTransfer.getData(threadDragType));
-            if (data.projectId === projectId && typeof data.threadId === "string") {
-              const target = position(event, id); onAdd(data.threadId, target.id, target.after);
-            }
-          } catch { /* Ignore unrelated and malformed drags. */ }
+          const data = readThreadDrag(event.dataTransfer);
+          if (data && (crossProject || data.projectId === projectId)) {
+            const target = position(event, id); onAdd(data.threadId, target.id, target.after, data.projectId);
+          }
         }}>{renderPane(id, ids.length > 1)}
       </div>
     </Fragment>)}
