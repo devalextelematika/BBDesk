@@ -4,16 +4,18 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
-## What's new in 0.1.6
+## What's new in 0.1.7
 
-- **Shared pool:** Pin conversations from connected projects and work with them side by side in one view. Drag a conversation onto Shared pool or use its pin button in tabs, More or history. Pinning keeps your current project open.
-- **Arrange your pool:** Reorder its bottom tabs to reorder chat columns, resize them and return to the saved layout in the same browser. Each column shows its project. Removing a conversation from the pool does not hide, archive or stop it.
-- **Create in the pool:** Start a conversation with the pool's new-thread button; the created thread is pinned automatically.
-- **Common threads:** Connect BB's personal conversations outside projects through a separate checkbox in project settings and open them from their own tab.
-- **Control visibility:** Turn Shared pool off in project settings without losing its saved conversations. This setting is shared across clients; pool membership, order, active column and widths stay local to each browser.
-- **Project tab layout:** Wrapped project tabs use the full width below the first row, with Common threads, Shared pool and settings kept at the upper right. Narrow workspaces retain a single horizontally scrolling row.
+- **Searchable Catalog:** Connect projects and applications from two tabs with immediate checkbox changes. Open it from the small settings button in the top toolbar; reorder connected entries in their own panels.
+- **Immediate hiding:** Conversation tabs disappear as soon as hiding succeeds, including in More. Background completion preserves the current conversation; failures leave the tab available.
+- **Safer pool creation:** A full Shared pool preserves the draft without creating a thread. If it fills during creation, use Open to reach the result. Late results respect newer navigation, unpinning and composer cancellation.
+- **Responsive activity refresh:** Show confirmed activity promptly while refresh runs in the background. Saved settings remain confirmed even if a later activity refresh fails.
+- **Mobile typing:** Fit chat to the visible viewport while the keyboard is open and temporarily hide workspace navigation without remounting the native chat.
+- **Maintenance:** Simplify workspace state and views, remove unused UI dependencies and split automated tests into independent groups. Existing settings and storage formats are retained.
 
 Pool conversations from disconnected projects remain listed as unavailable until removed. Archived threads, threads hidden in BB and subagents are excluded.
+
+The pool holds up to 50 conversations, including unavailable saved entries. When it is full, submitting from its composer keeps the draft and does not create a thread. If the pool fills while creation is already in progress, the created conversation remains accessible through an **Open** action in the current workspace. This recovery control is temporary and is not saved across reloads; the thread itself remains in BB. A late result preserves newer navigation and respects explicit unpinning. Turning the pool off cancels its composer without deleting saved entries or allowing a late result to reopen the pool. Disconnecting a composing project also prevents a late result from taking over navigation.
 
 Drag a bottom thread tab or a conversation from the history panel into the workspace to open it alongside the current chat. Drop on the left or right half of a column to insert there. Drag the dividers to resize adjacent chats; arrow keys also resize and double-click equalizes widths. Click a column to activate it: bottom tabs replace only that column, or focus a chat already open beside it. Alt+Enter on a bottom tab and the history panel's Open alongside button provide keyboard alternatives. Close a column with its header X; this does not hide, archive or stop the thread. Layouts are remembered locally per project. Columns have a minimum width of 320px and scroll horizontally when necessary.
 
@@ -23,16 +25,15 @@ Drag a bottom thread tab or a conversation from the history panel into the works
 
 ## Features
 
-- Choose projects to follow, reorder them in settings and switch between them. Drag a project handle or use its arrow controls, then Save; Cancel discards the draft order.
+- Use the Projects and Applications tabs in Catalog to connect or disconnect entries with a checkbox. Connected entries are green; changes apply immediately.
 - Identify each project's agent providers through icons beside its name, with provider and conversation details in tooltips.
 - Read and continue threads directly in the workspace.
 - Work with multiple conversations in resizable columns; layouts, active columns and widths are remembered in this browser per project.
 - Browse bottom conversation tabs from newest to oldest by creation time; status changes keep their order stable.
 - Open local file links from embedded chat in BB's native file preview on the conversation's host, including line locations.
 - Return to the last conversation in each project, including history, after switching projects or reloading the same browser tab.
-- Search all available non-archived project conversations by title or environment, including older conversations beyond the recent ten. Search keeps the current chat open until a result is selected; the attention filter applies to results.
 - Browse recent conversations with two-line titles, dates and environments, or open the full project in BB. On narrow workspaces history overlays the chat; project tabs stay in a single scrolling row.
-- A hidden tab stays in its slot, dimmed with an Undo icon, for 12 seconds. Click it to restore. The window pauses on hover, focus and saving; restoring does not switch the current conversation. Only the most recent hide offers Undo; the same behavior applies inside More.
+- Hidden tabs disappear as soon as hiding succeeds, without a timed placeholder. Hiding the current conversation selects a neighboring tab; hiding a background conversation keeps the current chat open.
 - Start a thread with its project preselected in BB's native composer.
 - Change permission mode before the next prompt in an existing thread. New threads start with the last mode successfully used in BBDesk, remembered in this browser; BB still enforces provider and machine limits.
 - Open registered application screens here or alongside using BB's native split action.
@@ -41,7 +42,15 @@ Drag a bottom thread tab or a conversation from the history panel into the works
 
 Connecting a project imports current work, queued work and pending questions. Earlier completed replies are not imported. New results remain until hidden. Hiding never archives or deletes a thread; fresh activity brings it back.
 
-Settings, search and history close on Escape and return keyboard focus to their opener. Arrow Down moves from the search input to its results. Search results are displayed in batches of 50; Show more reveals additional matches. Project-conversation memory belongs to the current browser-tab session and does not change shared project settings. Native drafts and existing reading-position handling remain owned by their existing mechanisms.
+Settings and history close on Escape and return keyboard focus to their opener. Thread search and the All threads/attention filter have been removed; the toolbar contains the application toggle and activity indicators. Project-conversation memory belongs to the current browser-tab session and does not change shared project settings. Native drafts and existing reading-position handling remain owned by their existing mechanisms.
+
+## Unified catalog
+
+One small settings button on the right of the top toolbar opens Catalog. It has two tabs, **Projects** and **Applications**, with a searchable compact list in each. Connected entries are green with a checked checkbox. Click the checkbox or its label to connect or disconnect immediately, without opening an entry or closing settings.
+
+There are no duplicate selected lists, reorder controls, application opening actions, label editors or Undo controls in settings. Reorder projects and applications directly in their panels. **Done** closes Catalog; there is no separate save step. Common threads and Shared pool remain checkboxes in the Projects tab.
+
+Unavailable saved entries appear in the same list and can be disconnected. Opening settings, searching and switching tabs preserve the mounted native chat and its draft.
 
 ## Requirements
 
@@ -75,7 +84,7 @@ BB must be running for installation. It builds local plugins again during instal
 
 ## Get started
 
-Open **BBDesk** in BB navigation, choose projects and configure application shortcuts. The stable plugin ID is `dashboard`; the page is `/plugins/dashboard/home` on your BB server.
+Open **BBDesk** in BB navigation, then use the small **Configure projects and applications** settings button on the right of the top toolbar to connect projects and add application shortcuts. The stable plugin ID is `dashboard`; the page is `/plugins/dashboard/home` on your BB server.
 
 If the launcher asks you to enable its navigation provider, choose **BBDesk** under **Settings → Appearance → Navigation**. It preserves BB's original rail and supplies the registered screens and native actions. Settings-only plugins do not provide launchable screens.
 
@@ -88,7 +97,7 @@ Open BB's settings for installed plugins, select **BBDesk**, and change **Interf
 - **English** is the default for new and existing installations without a saved preference.
 - **Русский** enables the Russian interface.
 
-The choice is stored by BB and shared across clients of the same BB server. No automatic language detection is used. Switching language updates BBDesk labels without resetting the selected project, open chat, search or unsaved launcher edits.
+The choice is stored by BB and shared across clients of the same BB server. No automatic language detection is used. Switching language updates BBDesk labels without resetting the selected project, open chat or settings.
 
 Project names, thread content, user-defined shortcut names and other applications keep their original text. BB's native chat and composer manage their own labels. The language selector itself uses the stable labels English and Русский.
 
@@ -102,13 +111,42 @@ npm run build
 
 Tests use Node's test runner, the SDK fake host and the SDK DOM harness. They check activity rules, language settings, translation coverage and UI behavior. These checks do not replace testing an installed plugin in BB. CI runs type checking and tests; building requires the BB CLI.
 
+`npm test` discovers root unit tests and the files under `tests/`, preloads the TypeScript/TSX loader, and runs files sequentially in separate Node processes. UI groups cover catalog/navigation, conversation memory, hiding/overflow, creation/late replies, split/shared pool, viewport/reading/files, snapshot refresh races, workspace transitions and mounted view lifecycles. Backend groups cover configuration/contracts and synchronization/lifecycle; permission-memory unit tests remain at the root. Pure workspace selectors, transition rules and view models have separate unit tests. Shared helpers own DOM, SDK slots, storage cleanup, factories, deferred responses and interaction fixtures. Each UI test releases its navigation bridge and React trees before restoring browser overrides, including when its callback throws. Backend tests use the SDK's real temporary SQLite storage.
+
+Run a group independently by passing its file to the same runner:
+
+```sh
+npm test -- tests/ui/creation.test.mjs
+npm test -- tests/backend/synchronization-lifecycle.test.mjs
+```
+
+Keep test files independent of module cache and execution order. Avoid restoring a production singleton through test-only exports; dispose its owning UI or harness instead. New TypeScript modules under `tests/` are included in type checking.
+
+Zod is the only production npm dependency. BB supplies React and the public SDK runtime to the built frontend. Development dependencies include the pinned SDK and its backend harness peers (`better-sqlite3`, `cron-parser`, `hono` and their required types), React/React DOM with Testing Library and jsdom for UI tests, TypeScript, and `css-tree` for CSS checks. Keep these test dependencies explicit even when the application does not import them directly.
+
+The lockfile pins the tested dependency tree; the SDK declaration/harness pin is `0.6.94`. The BB CLI builds with its own SDK and can warn when that differs from the package pin. Record both versions when verifying a release. A successful build with one host SDK does not validate the entire declared compatibility range; repinning the SDK is a separate change. Use a separate clean production-dependency copy to check the Git-install build policy described in [publishing notes](docs/PUBLISHING.md).
+
+Activity snapshots return the last confirmed state without waiting for SDK history reads. An initial snapshot can have `syncedAt: null`; background reconciliation publishes updates through `dashboard-changed`. Configuration mutations acknowledge durable settings writes and schedule activity import separately, so a later synchronization failure does not mean that saving settings failed.
+
+The activity service performs periodic full passes and coalesces targeted updates. Only a successful complete full pass advances `syncedAt` and clears `syncError`; cached snapshots and targeted passes do neither. Successful passes are spaced by at least 750 ms when more work is queued; failed reads or tracking writes retry after 5 seconds. Hide/restore and project connection revisions protect newer actions from older read results. Abort/disposal requests SDK cancellation through `AbortSignal`, invalidates pending results and prevents new background writes. An adapter may still finish an SDK call after cancellation, and a storage write already started cannot be rolled back by cancellation.
+
 After local installation, `bb plugin dev` rebuilds and reloads the plugin when files change.
 
 Key files:
 
 - `server.ts`: RPC, native plugin settings and activity tracking.
-- `state.ts`: thread inclusion and hiding rules.
-- `app.tsx`: workspace, embedded chat and new-thread composer.
+- `contracts.ts`: shared configuration, catalog and RPC schemas/types.
+- `configuration.ts`, `catalog-config.ts`: atomic configuration transformations and compatibility adapters.
+- `activity-sync.ts`: coalesced background reads, retry timing and cancellation.
+- `state.ts`: thread inclusion and hiding rules, with explicit sidebar/server activity adapters.
+- `hooks/use-dashboard-snapshot.ts`: coalesced snapshot reads, realtime/reconnect refresh, and configuration revision guards.
+- `workspace-selectors.ts`: per-render thread/project/tracking indices, visibility, status, entry selection, history and project/pool models. Indices are rebuilt from current inputs so in-place updates cannot leave a persistent cache stale.
+- `workspace-transitions.ts`: pure workspace events and explicit conversation/composer selection, with pending operations kept separately.
+- `hooks/use-workspace.ts`, `hooks/use-workspace-actions.ts`: synchronous transition dispatch, compatible browser persistence, and SDK/RPC effects. See [workspace transitions](docs/WORKSPACE_TRANSITIONS.md) for the event table and race guards.
+- `app.tsx`: workspace coordination, navigation and view-model wiring.
+- `workspace-view-models.ts`: project/pool presentation data, including cached titles, details and status within one render.
+- `components/project-workspace.tsx`, `components/shared-pool-workspace.tsx`: separate project/pool views with typed data and domain actions.
+- `components/workspace-chat.tsx`: native chat wrapper, file surface, permission memory and reading lifecycle shared by both views.
 - `split-layout.ts`, `split-workspace.tsx`: conversation columns, resizing and local layout persistence.
 - `launcher-navigation.tsx`: bridge to BB navigation.
 - `launcher-panel.tsx`: application panel layout and persistence.
@@ -117,9 +155,11 @@ Key files:
 
 Keep the package name `bb-plugin-dashboard`: the `dashboard` ID, routes and stored settings depend on it. Adding another language requires a translated catalog and an explicit setting option; there is no user-facing translation editor.
 
+Existing RPC methods and whole-list replacement behavior remain available. See [RPC compatibility](docs/RPC_COMPATIBILITY.md) for the caller inventory, catalog operations and preserved semantics.
+
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-See the [changelog](CHANGELOG.md) and [v0.1.6 release notes](docs/releases/v0.1.6.md) for release changes. Installing from the GitHub URL follows the repository's default branch. Install version 0.1.6 explicitly with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.6`.
+Version `0.1.7` is a patch update from `0.1.6`. See the [changelog](CHANGELOG.md) and [v0.1.7 release notes](docs/releases/v0.1.7.md) for changes, verification and remaining acceptance checks. Install this exact release with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.7`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
 
 ## License
 

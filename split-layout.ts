@@ -42,6 +42,8 @@ export function selectSplitThread(layout: SplitLayout, id: string): SplitLayout 
 
 export type PoolEntry = { projectId: string; threadId: string };
 export type SharedPool = { entries: PoolEntry[]; active: string; sizes: Record<string, number>; open: boolean };
+export const sharedPoolLimit = 50;
+export type PoolAddition = { pool: SharedPool; status: "added" | "present" | "limit" | "invalid" };
 const poolStorageKey = "bb-dashboard:shared-pool:v1";
 const emptyPool = (): SharedPool => ({ entries: [], active: "", sizes: {}, open: false });
 
@@ -71,7 +73,7 @@ export function readSharedPool(): SharedPool {
       const threadId = (entry as PoolEntry).threadId;
       if (!validId(projectId) || !validId(threadId) || entries.some(item => item.threadId === threadId)) continue;
       entries.push({ projectId, threadId });
-      if (entries.length >= 50) break;
+      if (entries.length >= sharedPoolLimit) break;
     }
     const sizes = Object.fromEntries(entries.map(entry => {
       const size = row.sizes?.[entry.threadId];
@@ -89,18 +91,18 @@ export function saveSharedPool(pool: SharedPool) {
   catch { /* Pinning and navigation also work with blocked browser storage. */ }
 }
 
-export function addPoolEntry(pool: SharedPool, entry: PoolEntry, target?: string, after = true): SharedPool {
-  if (!validId(entry.projectId) || !validId(entry.threadId)) return pool;
+export function addPoolEntry(pool: SharedPool, entry: PoolEntry, target?: string, after = true): PoolAddition {
+  if (!validId(entry.projectId) || !validId(entry.threadId)) return { pool, status: "invalid" };
   const existing = pool.entries.find(item => item.threadId === entry.threadId);
   if (existing) {
     const entries = pool.entries.map(item => item.threadId === entry.threadId ? { projectId: entry.projectId, threadId: entry.threadId } : item);
-    return { ...pool, entries, active: entry.threadId };
+    return { pool: { ...pool, entries, active: entry.threadId }, status: "present" };
   }
-  if (pool.entries.length >= 50) return pool;
+  if (pool.entries.length >= sharedPoolLimit) return { pool, status: "limit" };
   const entries = [...pool.entries];
   const index = target ? entries.findIndex(item => item.threadId === target) : entries.findIndex(item => item.threadId === pool.active);
   entries.splice(index < 0 ? entries.length : index + Number(after), 0, { projectId: entry.projectId, threadId: entry.threadId });
-  return { ...pool, entries, active: entry.threadId, sizes: {} };
+  return { pool: { ...pool, entries, active: entry.threadId, sizes: {} }, status: "added" };
 }
 
 export function movePoolEntry(pool: SharedPool, threadId: string, targetId: string, after = true): SharedPool {

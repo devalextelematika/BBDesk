@@ -1,4 +1,54 @@
 /* Local controls, plus the scoped native voice-send contrast repair below. */
+/* The shared catalog overlays both panels without unmounting their chat. */
+.db-catalog-overlay { position:absolute; inset:0; z-index:40; display:flex; align-items:center; justify-content:center; padding:16px; background:color-mix(in srgb,var(--foreground) 18%,transparent); }
+.db-catalog-window { width:min(540px,100%); max-height:100%; min-height:0; display:flex; flex-direction:column; overflow:hidden; border-radius:12px; background:var(--background); box-shadow:0 12px 40px color-mix(in srgb,var(--foreground) 18%,transparent); }
+.db-catalog-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border-bottom:1px solid var(--border); }
+.db-catalog-heading h2 { font-size:16px; font-weight:600; margin:0; }
+.db-catalog-heading p { margin:4px 0 0; color:var(--muted-foreground); font-size:12px; }
+.db-catalog-tabs { display:flex; flex-shrink:0; gap:16px; padding:0 16px; border-bottom:1px solid var(--border); }
+.db-catalog-tabs button { appearance:none; background:transparent; border:0; border-bottom:2px solid transparent; padding:10px 0; color:var(--muted-foreground); font:inherit; font-size:13px; cursor:pointer; }
+.db-catalog-tabs [aria-selected="true"] { border-bottom-color:var(--db-accent); color:var(--foreground); }
+.db-catalog-tabs button:hover { color:var(--foreground); }
+.db-catalog-browse { display:flex; flex-direction:column; gap:10px; padding:12px 16px; min-width:0; min-height:0; }
+.db-catalog-browse > .db-input { width:100%; flex:0 0 32px; height:32px; min-height:32px; max-height:32px; padding:5px 8px; line-height:20px; }
+.db-catalog-results { overflow:auto; min-height:0; max-height: min(440px,50dvh); padding:2px; scrollbar-gutter:stable; }
+.db-catalog-items { list-style:none; padding:0; margin:0; }
+.db-catalog-item { min-width:0; border-bottom:1px solid var(--db-soft-border); }
+.db-catalog-item label, .db-catalog-special label { display:flex; align-items:center; gap:9px; min-height:34px; padding:6px 8px; font-size:13px; cursor:pointer; }
+.db-catalog-item input, .db-catalog-special input { flex-shrink:0; width:15px; height:15px; margin:0; accent-color:var(--success); }
+.db-catalog-item[data-added="true"], .db-catalog-special label:has(input:checked) { background:color-mix(in srgb,var(--success) 12%,var(--background)); color:color-mix(in srgb,var(--success) 70%,var(--foreground)); }
+.db-catalog-item label:hover, .db-catalog-special label:hover { background:color-mix(in srgb,var(--foreground) 5%,transparent); }
+.db-catalog-item label:has(input:disabled), .db-catalog-special label:has(input:disabled) { cursor:default; }
+.db-catalog-item-title { min-width:0; overflow-wrap:anywhere; }
+.db-catalog-item small { margin-left:auto; color:var(--muted-foreground); font-size:11px; }
+.db-catalog-special { flex-shrink:0; border-top:1px solid var(--border); padding-top:8px; }
+.db-catalog-footer { padding:10px 16px; border-top:1px solid var(--border); color:var(--muted-foreground); font-size:12px; flex-shrink:0; }
+.db-catalog-footer [role="alert"] { color:var(--destructive); }
+.db-catalog-overlay :is(button,input):focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.db-catalog-overlay input { caret-color:var(--foreground); }
+.db-catalog-overlay ::selection { background:color-mix(in srgb,var(--db-accent) 25%,transparent); }
+@container dashboard (max-width:600px) {
+  .db-catalog-overlay { padding:8px; }
+  .db-catalog-heading { padding:12px; }
+  .db-catalog-browse { padding:10px 12px; }
+  .db-catalog-item label, .db-catalog-special label { min-height:38px; }
+}
+
+/* Keep a stable host-sized frame; only its child follows the visual viewport. */
+.db-viewport { position:relative; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; }
+.db-viewport > .db-root { position:absolute; top:var(--db-visible-top,0px); left:0; width:100%; height:var(--db-visible-height,100%); }
+
+/* Temporary mobile typing mode: hide navigation without unmounting the native
+   chat, its draft, selection, attachments or the user's reading position. */
+.db-viewport[data-mobile-composing="true"] .db-header,
+.db-viewport[data-mobile-composing="true"] .db-project-bar,
+.db-viewport[data-mobile-composing="true"] .db-thread-dock { display:none; }
+.db-viewport[data-mobile-composing="true"] .db-main { grid-template-rows:0 minmax(0,1fr); }
+.db-viewport[data-mobile-composing="true"] .db-layout { grid-template-columns:minmax(0,1fr); }
+.db-viewport[data-mobile-composing="true"] .db-launcher-shell,
+.db-viewport[data-mobile-composing="true"] .db-launcher-backdrop,
+.db-viewport[data-mobile-composing="true"] .db-launcher-resize { display:none; }
+.db-viewport[data-mobile-composing="true"] .db-new-composer { min-height:0; }
 .db-root {
   position: relative;
   --db-accent: #5263e8;
@@ -23,18 +73,12 @@
   caret-color: var(--primary);
 }
 .db-root, .db-root * { box-sizing: border-box; }
-.db-header { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr); align-items:center; gap:6px 12px; min-height:44px; padding:6px 12px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.db-header { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:6px 12px; min-height:44px; padding:6px 12px; border-bottom:1px solid var(--border); flex-shrink:0; }
 .db-thread-indicators { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; min-width:0; gap:0; }
 .db-thread-indicator { display:inline-flex; align-items:center; justify-content:center; flex:0 0 16px; width:16px; height:30px; padding:0; border:0; border-radius:5px; background:transparent; cursor:pointer; }
 .db-thread-indicator:hover { background:var(--state-hover); }
 .db-thread-indicator[aria-pressed="true"] { background:color-mix(in srgb,var(--db-accent) 9%,var(--background)); }
 .db-thread-indicator:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
-.db-header-tools { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:4px; min-width:0; max-width:100%; }
-.db-header-tools .db-icon-btn { width:30px; height:30px; padding:6px; }
-.db-filter { min-width:0; }
-.db-filter select { min-height:30px; max-width:100%; padding:4px 7px; border:1px solid var(--border); border-radius:5px; background:var(--background); color:var(--db-project-text); font:inherit; font-size:12px; }
-.db-header .db-search { flex:0 1 155px; width:155px; min-height:30px; max-width:100%; padding:4px 7px; margin:0; }
-.db-connection { display:flex; flex-shrink:0; align-items:center; justify-content:center; width:22px; min-height:30px; color:var(--muted-foreground); }
 .db-layout { position:relative; isolation:isolate; flex:1; display:grid; grid-template-columns:var(--db-launcher-width,208px) minmax(0,1fr); align-items:stretch; min-width:0; min-height:0; overflow:hidden; transition:grid-template-columns 200ms cubic-bezier(.16,1,.3,1); }
 .db-layout[data-launcher-open="false"] { grid-template-columns:0 minmax(0,1fr); }
 .db-launcher-shell { position:relative; min-width:0; min-height:0; width:var(--db-launcher-width,208px); transform:translateX(0); transition:transform 200ms cubic-bezier(.16,1,.3,1),visibility 200ms; z-index:2; }
@@ -49,23 +93,21 @@
 .db-resizing .db-layout, .db-resizing .db-launcher-shell { transition:none; }
 .db-launcher-backdrop { display:none; }
 .db-launcher-list { display:flex; flex-direction:column; gap:9px; flex:1; min-height:0; overflow-y:auto; }
-.db-launcher-footer { display:flex; flex-shrink:0; justify-content:flex-start; padding-top:6px; }
-.db-settings-popover { position:absolute; z-index:3; display:flex; min-width:0; min-height:0; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--background); box-shadow:0 8px 24px color-mix(in srgb,var(--foreground) 12%,transparent); }
-.db-launcher-settings { left:12px; top:18px; bottom:56px; width:min(520px,calc(100cqw - 24px)); }
-.db-project-settings { grid-area:2 / 1; right:8px; top:8px; bottom:12px; width:min(520px,calc(100% - 16px)); }
-.db-settings-popover .db-settings { flex:1; max-height:100%; margin:0; border:0; border-radius:0; background:var(--background); }
 .db-launcher-head { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; margin-bottom:8px; padding-left:4px; }
 .db-launcher-head h2 { min-width:0; font-size:13px; font-weight:500; margin:0; overflow-wrap:anywhere; color:var(--db-system-text); }
 .db-icon { width:16px; height:16px; flex-shrink:0; }
 .db-button, .db-icon-btn, .db-launch-main, .db-launch-split, .db-tabs button, .db-thread-open { font:inherit; cursor:pointer; color:var(--foreground); touch-action:manipulation; }
-.db-button:focus-visible, .db-icon-btn:focus-visible, .db-launch-main:focus-visible, .db-launch-split:focus-visible, .db-thread-open:focus-visible, .db-input:focus-visible, .db-search input:focus-visible, .db-checks input:focus-visible, .db-filter select:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.db-button:focus-visible, .db-icon-btn:focus-visible, .db-launch-main:focus-visible, .db-launch-split:focus-visible, .db-thread-open:focus-visible, .db-input:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
 .db-button:disabled, .db-icon-btn:disabled, .db-launch-main:disabled, .db-launch-split:disabled { cursor:default; opacity:.5; }
 .db-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-width:0; max-width:100%; min-height:36px; padding:7px 11px; border:1px solid var(--border); border-radius:6px; background:var(--card); font-size:13px; font-weight:500; white-space:nowrap; }
 .db-button:not(:disabled):hover, .db-icon-btn:not(:disabled):hover, .db-launch-main:not(:disabled):hover, .db-launch-split:not(:disabled):hover { background:var(--state-hover); }
 .db-primary { background:var(--foreground); color:var(--background); border-color:var(--foreground); }
 .db-primary:not(:disabled):hover { background:color-mix(in srgb,var(--foreground) 87%,var(--background)); }
 .db-icon-btn { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; flex-shrink:0; padding:7px; border:0; border-radius:5px; background:transparent; color:var(--muted-foreground); }
-.db-launch-row { display:flex; align-items:stretch; width:100%; min-width:0; border:1px solid var(--db-soft-border); border-radius:7px; background:var(--background); }
+.db-launch-row { position:relative; display:flex; align-items:stretch; width:100%; min-width:0; border:1px solid var(--db-soft-border); border-radius:7px; background:var(--background); user-select:none; }
+.db-root .db-launch-row[data-drop]::after { content:""; position:absolute; z-index:2; left:6px; right:6px; height:2px; background:var(--primary); pointer-events:none; }
+.db-root .db-launch-row[data-drop="before"]::after { top:-2px; }
+.db-root .db-launch-row[data-drop="after"]::after { bottom:-2px; }
 .db-launch-main > .db-icon { flex:0 0 16px; color:var(--db-icon-accent-text); }
 .db-launch-main { display:flex; align-items:center; justify-content:flex-start; gap:8px; flex:1; min-width:0; padding:11px 9px; border:0; border-radius:6px 0 0 6px; background:transparent; text-align:left; font-size:13px; }
 .db-launch-main > .db-launch-label { flex:1; min-width:0; overflow-wrap:anywhere; color:var(--db-project-text); }
@@ -79,9 +121,6 @@
 /* Keep native chat layers below the sibling project settings popover. */
 .db-project-content { grid-area:2 / 1; isolation:isolate; min-width:0; min-height:0; overflow:auto; }
 .db-muted { margin:0; color:var(--db-system-text); font-size:13px; line-height:1.6; }
-.db-search { display:flex; align-items:center; gap:7px; flex:1 1 170px; min-width:0; min-height:40px; max-width:260px; margin-left:auto; padding:7px 10px; border:1px solid var(--border); border-radius:6px; color:var(--muted-foreground); }
-.db-search input { width:100%; min-width:0; border:0; background:transparent; color:var(--foreground); font:inherit; font-size:13px; }
-.db-search input::placeholder { color:var(--db-system-text); }
 .db-project-bar { grid-area:1 / 1; display:flow-root; min-width:0; border-bottom:1px solid var(--border); }
 .db-project-tools { float:right; display:flex; align-items:center; flex-shrink:0; margin-left:auto; padding:0 8px; }
 /* Only the first project row reserves room for the tools at the right. */
@@ -94,7 +133,10 @@
 .db-pool-toggle[data-drop] { outline:1px dashed var(--primary); background:color-mix(in srgb,var(--primary) 10%,var(--background)); }
 .db-pool-toggle:focus-visible { outline:2px solid var(--ring); outline-offset:-3px; }
 .db-project-tabs { display:flex; flex-wrap:wrap; align-items:stretch; flex:1; gap:2px; min-width:0; max-width:100%; padding:0 8px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
-.db-project-tab-wrap { display:flex; align-items:center; flex-shrink:0; min-width:0; max-width:100%; margin:5px 0; border-radius:6px; }
+.db-project-tab-wrap { position:relative; display:flex; align-items:center; flex-shrink:0; min-width:0; max-width:100%; margin:5px 0; border-radius:6px; }
+.db-root .db-project-tab-wrap[data-drop]::after { content:""; position:absolute; z-index:2; top:4px; bottom:4px; width:2px; background:var(--primary); pointer-events:none; }
+.db-root .db-project-tab-wrap[data-drop="before"]::after { left:-3px; }
+.db-root .db-project-tab-wrap[data-drop="after"]::after { right:-3px; }
 .db-project-bar[data-shared-pool] .db-project-tab-wrap { opacity:.5; transition:opacity 140ms ease; }
 .db-project-bar[data-shared-pool] .db-project-tab-wrap:hover, .db-project-bar[data-shared-pool] .db-project-tab-wrap:focus-within { opacity:1; }
 @media (prefers-reduced-motion:reduce) { .db-project-bar[data-shared-pool] .db-project-tab-wrap { transition:none; } }
@@ -187,23 +229,13 @@
 .db-root .db-project-workspace > .db-history { grid-area:1 / 2; min-height:0; overflow:auto; padding:8px; border-left:1px solid var(--db-soft-border); background:var(--background); overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
 .db-root .db-history-thread { display:block; width:100%; min-height:32px; padding:7px 9px; border:0; border-radius:5px; background:transparent; color:var(--db-project-text); font:inherit; font-size:12px; text-align:left; cursor:pointer; }
 .db-root .db-history-thread .db-thread-title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:inherit; font-weight:400; }
-.db-root .db-history-thread .db-thread-title, .db-root .db-conversation-results .db-thread-title { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; white-space:normal; overflow:hidden; overflow-wrap:anywhere; }
+.db-root .db-history-thread .db-thread-title { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; white-space:normal; overflow:hidden; overflow-wrap:anywhere; }
 .db-conversation-meta { display:flex; align-items:baseline; gap:8px; min-width:0; margin-top:3px; color:var(--db-system-text); font-size:11px; }
 .db-conversation-meta time { flex-shrink:0; font-variant-numeric:tabular-nums; }
 .db-conversation-meta > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .db-picker-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; color:var(--db-system-text); font-size:12px; }
 .db-all-conversations { display:block; padding:10px 9px; color:var(--db-project-text); font-size:12px; text-underline-offset:3px; }
 .db-all-conversations:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
-.db-search-results { grid-area:2 / 1; position:absolute; top:8px; right:8px; z-index:4; width:min(460px,calc(100% - 16px)); max-height:calc(100% - 16px); overflow:auto; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--background); box-shadow:0 8px 24px color-mix(in srgb,var(--foreground) 12%,transparent); overscroll-behavior:contain; }
-.db-search-scope { margin:0 0 10px; color:var(--db-system-text); font-size:12px; overflow-wrap:anywhere; }
-.db-conversation-results { display:flex; flex-direction:column; gap:3px; }
-.db-root .db-conversation-results > .db-button { align-self:flex-start; margin-top:8px; }
-.db-root [data-undo="true"] { background:color-mix(in srgb,var(--foreground) 3%,var(--background)); }
-.db-root .db-thread-undo { color:var(--db-system-text); gap:8px; }
-.db-root .db-thread-undo .db-undo-tab-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.65; }
-.db-root .db-thread-undo .db-icon { width:14px; height:14px; flex-shrink:0; }
-.db-root .db-thread-undo:hover .db-undo-tab-title, .db-root .db-thread-undo:focus-visible .db-undo-tab-title { opacity:1; }
-.db-root .db-thread-undo:disabled { cursor:default; }
 .db-root .db-history-thread:hover { background:var(--state-hover); }
 .db-root .db-history-thread[aria-pressed="true"] { background:color-mix(in srgb,var(--db-accent) 9%,var(--background)); color:var(--foreground); }
 .db-root .db-history-thread:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
@@ -253,8 +285,6 @@
 .db-state.result { color:color-mix(in srgb,var(--success) 70%,var(--foreground)); }
 .db-dot.attention { background:#eab308; }
 .db-state.attention { color:var(--warning-text,var(--warning)); }
-.db-connection .db-dot.running { background:var(--success); }
-.db-connection .db-dot.waiting { background:var(--warning); }
 .db-dot.error { background:var(--destructive); }
 .db-state.error { color:var(--destructive-text,var(--destructive)); }
 .db-state.read, .db-state.unknown { color:var(--db-system-text); }
@@ -291,30 +321,9 @@
 .db-empty p { max-width:46ch; margin:0 auto 18px; }
 .db-empty-icon { display:block; width:24px; height:24px; margin:0 auto; color:var(--muted-foreground); }
 .db-launcher-empty .db-empty-icon { margin:0; }
-.db-settings { display:flex; flex-direction:column; min-width:0; min-height:0; max-height:calc(100% - 24px); margin:12px; padding:16px; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--muted); }
-.db-settings-heading { display:flex; flex-shrink:0; align-items:center; justify-content:space-between; gap:12px; }
-.db-settings-body { flex:1 1 auto; min-width:0; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
-.db-settings h3 { min-width:0; margin:0; font-size:15px; font-weight:600; }
-.db-checks { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:10px; margin:16px 0; }
-.db-checks label { display:flex; align-items:center; gap:8px; min-width:0; min-height:36px; font-size:13px; cursor:pointer; overflow-wrap:anywhere; }
-.db-checks input { flex-shrink:0; width:16px; height:16px; accent-color:var(--primary); }
-.db-checks .db-common-threads, .db-checks .db-shared-pool-option { grid-column:1 / -1; }
-.db-checks .db-common-threads, .db-edit-project.db-common-threads .db-project-name { color:var(--db-common); }
-.db-checks .db-shared-pool-option { color:var(--db-accent); }
 .db-shared-pool-option input { accent-color:var(--db-accent); }
 .db-common-threads input { accent-color:var(--db-common); }
-.db-edit-app { display:flex; align-items:center; gap:5px; width:100%; min-width:0; margin:8px 0; }
-.db-root .db-edit-app { position:relative; }
-.db-project-name { flex:1; min-width:0; overflow-wrap:anywhere; font-size:13px; }
-.db-root .db-app-drag { flex-shrink:0; cursor:grab; }
-.db-root .db-app-drag:active { cursor:grabbing; }
-.db-root .db-app-drag:disabled { cursor:default; }
-.db-root .db-edit-app[data-dragging] { opacity:.5; }
-.db-root .db-edit-app[data-drop]::after { content:""; position:absolute; left:0; right:0; height:2px; background:var(--primary); pointer-events:none; }
-.db-root .db-edit-app[data-drop="before"]::after { top:-5px; }
-.db-root .db-edit-app[data-drop="after"]::after { bottom:-5px; }
 .db-input { flex:1; min-width:0; padding:8px 10px; border:1px solid var(--border); border-radius:5px; background:var(--background); color:var(--foreground); font:inherit; }
-.db-settings-footer { display:flex; flex-shrink:0; flex-wrap:wrap; gap:8px; margin-top:18px; }
 .db-note { margin:12px 0 0; font-size:12px; color:var(--db-system-text); line-height:1.6; overflow-wrap:anywhere; }
 .db-error, .db-warning { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:15px; padding:12px; border:1px solid var(--border); border-radius:6px; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
 .db-error > span { flex:1 1 220px; min-width:0; }
@@ -346,13 +355,9 @@
   .db-root .db-thread-workspace .db-thread-open { height:48px; padding:8px 10px; }
   .db-root .db-thread-workspace .db-thread-detail { display:none; }
 }
-@container dashboard (max-width:960px) {
-  .db-search { max-width:none; }
-}
 @container dashboard (max-width:820px) {
   .db-header { grid-template-columns:44px minmax(0,1fr) 44px; }
   .db-thread-indicators { grid-column:2; grid-row:1; }
-  .db-header-tools { grid-column:1 / -1; grid-row:2; }
   .db-thread-open { grid-template-columns:12px minmax(0,1fr) 16px; }
   .db-state { grid-column:2; grid-row:2; white-space:normal; }
   .db-thread-open > .db-icon { grid-column:3; grid-row:1 / span 2; }
@@ -368,18 +373,16 @@
 }
 @container dashboard (max-width:420px) {
   .db-header { gap:5px 9px; padding:6px 10px; }
-  .db-header-tools { width:100%; justify-content:flex-end; }
   .db-project-tabs { padding:0 4px; }
   .db-thread-open { padding:12px 10px; }
   .db-chat { padding:0 5px 7px; }
-  .db-settings { padding:12px; }
 }
 @media(pointer:coarse) {
   .db-thread-indicator { flex-basis:44px; width:44px; height:44px; }
   .db-icon-btn, .db-launch-split { min-width:44px; min-height:44px; }
-  .db-button, .db-project-tab, .db-filter select, .db-checks label { min-height:44px; }
+  .db-button, .db-project-tab { min-height:44px; }
   .db-tab-create.db-icon-btn { min-width:44px; min-height:44px; }
-  .db-search input, .db-input { font-size:16px; }
+  .db-input { font-size:16px; }
 }
 @media(prefers-reduced-motion:reduce) {
   .db-layout, .db-launcher-shell { transition:none; }

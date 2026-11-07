@@ -9,7 +9,6 @@ const paths = {
   LayoutGrid: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
   AppWindow: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/></>,
   Columns2: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></>,
-  Search: <><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></>,
   FolderOpen: <><path d="M3 8V5a2 2 0 0 1 2-2h5l3 3h6a2 2 0 0 1 2 2v2M3 8h18l-3 12H3Z"/></>,
   Plus: <path d="M12 5v14M5 12h14"/>,
   X: <path d="m6 6 12 12M18 6 6 18"/>,

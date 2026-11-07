@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.7 — 2026-11-07
+
+- Replace separate setup forms with a searchable Catalog containing Projects and Applications tabs. Checkbox changes apply immediately and keep Catalog, the current project and native chat mounted. Connected entries are green; Common threads and Shared pool have separate checkboxes.
+- Use one small settings button in the top toolbar. Reorder projects and applications in their panels; remove duplicate selected lists, navigation, label editing and Undo controls from Catalog.
+- Remove the five-second Undo placeholder when hiding a conversation; tabs close immediately after a successful hide, including in More. Preserve the current conversation when a background hide completes, and retain a tab if hiding fails.
+- Enforce the 50-conversation Shared pool limit before creation, preserve a blocked draft, and offer Open for results that cannot be placed after a race. Late results respect newer navigation, explicit unpinning and composer cancellation after disabling the pool or disconnecting a project.
+- Return confirmed activity snapshots promptly and refresh in the background, with coalescing, retries and cancellation/revision guards. Saved configuration remains confirmed if a later activity import fails; only a complete successful pass advances the full-sync timestamp and clears its error.
+- Separate configuration transformations, snapshot refresh, workspace selectors/transitions, asynchronous actions and project/pool views. Retain existing RPC schemas, compatibility operations and storage formats.
+- Remove unused UI dependencies and vendored components. Keep Zod as the only production dependency and make development/test dependencies explicit. Split tests into independent backend, UI and unit groups with shared cleanup helpers and a portable runner.
+- Fit mobile chat to the visible viewport while the software keyboard is open. Temporarily hide dashboard navigation and bottom thread tabs during typing, then restore them without remounting the native chat.
+
+A patch update from 0.1.6. Source/harness and clean-build verification are separate from installed-host and mobile-device acceptance. See [release notes](docs/releases/v0.1.7.md) for verification results and limits.
+
 ## 0.1.6 — 2026-11-02
 
 - Pin conversations from connected projects into a Shared pool with native chats side by side. Add them by drag-and-drop or pin controls in tabs, More and history without leaving the current project.

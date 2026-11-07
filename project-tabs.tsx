@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type DragEvent } from "react";
+import { useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { experimental_ProviderIcon as ProviderIcon, experimental_useProviders as useProviders } from "@get-bb/plugin-sdk/app";
 import { Icon } from "./components/ui/icon";
 import { ThreadIndicator } from "./components/thread-indicator";
@@ -60,19 +60,26 @@ function ProjectFace({ name, states }: { name: string; states: ProjectTab["state
   </>;
 }
 
-export function ProjectTabs({ projects, activeId, onSelect, onCreate, label }: {
+export function ProjectTabs({ projects, activeId, onSelect, onCreate, onReorder, label }: {
   projects: ProjectTab[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onCreate: (id: string) => void;
+  onReorder?: (id: string, targetId: string, after: boolean) => void;
   label?: string;
 }) {
   const { t: tr } = useTranslation();
   const directory = useProviders();
   const root = useRef<HTMLDivElement>(null);
+  const drag = useRef<string | null>(null);
+  const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const tabs = [...projects.filter(project => !project.common), ...projects.filter(project => project.common)];
   const tabStop = tabs.some(project => project.id === activeId) ? activeId : tabs[0]?.id ?? null;
   useLayoutEffect(() => { root.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }, [activeId]);
+  function dropSide(event: DragEvent<HTMLElement>, id: string) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { id, after: event.clientX >= rect.left + rect.width / 2 };
+  }
   return <div ref={root} className="db-project-tabs" role="tablist" aria-label={label ?? tr("projects")}>
     {tabs.map(project => {
       const active = project.id === activeId;
@@ -80,9 +87,26 @@ export function ProjectTabs({ projects, activeId, onSelect, onCreate, label }: {
       const description = !project.available ? tr("unavailableProject") : project.states.length ? summary : project.total ? tr("results") : tr("noActivity");
       const ordered = [...project.states].sort((a, b) => a.id.localeCompare(b.id));
       const threads = ordered.map(state => state.providerId ? `${state.title}: ${state.text} (${providerLabel(state.providerId, directory.providers)})` : `${state.title}: ${state.text}`).join("; ");
-      return <div className={`db-project-tab-wrap${project.common ? " db-common-threads" : ""}${active ? " selected" : ""}`} role="presentation" key={project.id}>
+      const dropMark = drop?.id === project.id ? drop.after ? "after" : "before" : undefined;
+      return <div className={`db-project-tab-wrap${project.common ? " db-common-threads" : ""}${active ? " selected" : ""}`} role="presentation" key={project.id} data-drop={dropMark} aria-dropeffect={drop ? "move" : undefined}
+        onDragOver={event => {
+          if (!onReorder || drag.current === null || drag.current === project.id) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          const next = dropSide(event, project.id);
+          setDrop(previous => previous?.id === next.id && previous.after === next.after ? previous : next);
+        }}
+        onDrop={event => {
+          const source = drag.current;
+          drag.current = null; setDrop(null);
+          if (!onReorder || !source || source === project.id) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onReorder(source, project.id, dropSide(event, project.id).after);
+        }}>
         <button type="button" role="tab" id={`db-project-tab-${project.id}`} aria-controls={`db-project-panel-${project.id}`}
           aria-selected={active} tabIndex={project.id === tabStop ? 0 : -1} className="db-project-tab" aria-label={`${project.name}, ${summary}. ${threads}`} title={`${project.name}: ${description}`}
+          draggable={!!onReorder}
           onClick={() => onSelect(project.id)} onKeyDown={event => {
             const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
             if (!delta && event.key !== "Home" && event.key !== "End") return;
@@ -94,7 +118,14 @@ export function ProjectTabs({ projects, activeId, onSelect, onCreate, label }: {
             const target = event.currentTarget.closest('[role="tablist"]')?.querySelector<HTMLButtonElement>(`[id="db-project-tab-${next.id}"]`);
             target?.focus();
             target?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-          }}>
+          }}
+          onDragStart={event => {
+            if (!onReorder) return;
+            drag.current = project.id;
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", `db-project:${project.id}`);
+          }}
+          onDragEnd={() => { drag.current = null; setDrop(null); }}>
           <ProjectFace name={project.name} states={project.states}/>
         </button>
         <button type="button" className="db-tab-create db-icon-btn" disabled={!project.available}

@@ -1,25 +1,14 @@
-import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
-import { z } from "zod";
+import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { randomUUID } from "node:crypto";
-import { reconcileThread, hideThread, type Activity, type TrackedThread } from "./state";
+import { reconcileThread, hideThread, serverActivity as activity, type TrackedThread } from "./state";
 import { languageSetting } from "./i18n";
+import { configSchema, trackedSchema, rpcContract, type DashboardConfig } from "./contracts";
+import { changeConfiguration, projectValidationIds, type ConfigMutation } from "./configuration";
+import { createActivitySync, type ActivitySyncWork } from "./activity-sync";
 
-const id = z.string().min(1).max(200);
-const projectSchema = z.object({ id, enabled: z.boolean(), connectedAt: z.number().nonnegative() });
-const configSchema = z.object({
-  projects: z.array(projectSchema).refine(projects => projects.filter(project => project.enabled).length <= 100, "At most 100 projects can be enabled"),
-  launcher: z.array(z.object({ id, label: z.string().min(1).max(200) })).max(100),
-  sharedPool: z.boolean().default(true),
-});
-const trackedSchema = z.object({ id, projectId: id, visible: z.boolean(), latestAttentionAt: z.number(), hiddenAttentionAt: z.number() });
-export type DashboardConfig = z.infer<typeof configSchema>;
-export const rpcContract = defineRpcContract({
-  snapshot: { input: z.null(), output: z.object({ config: configSchema, tracked: z.array(trackedSchema), syncError: z.string().nullable(), syncedAt: z.number().nullable() }) },
-  projects_set: { input: z.object({ ids: z.array(id).max(100), sharedPool: z.boolean().optional() }), output: configSchema },
-  launcher_set: { input: z.object({ items: configSchema.shape.launcher }), output: configSchema },
-  thread_hide: { input: z.object({ threadId: id }), output: z.object({ hidden: z.boolean(), undoToken: z.string().optional() }) },
-  thread_restore: { input: z.object({ threadId: id, undoToken: z.string().min(1).max(200) }), output: z.object({ restored: z.boolean() }) },
-});
+// Keep the original source exports for existing SDK consumers.
+export { rpcContract } from "./contracts";
+export type { DashboardConfig } from "./contracts";
 
 export default async function plugin(bb: BbPluginApi) {
   bb.settings.define({ language: languageSetting });
@@ -34,9 +23,12 @@ export default async function plugin(bb: BbPluginApi) {
   let syncedAt: number | null = null;
   let syncError: string | null = null;
   let disposed = false;
+  const projectRevisions = new Map<string, number>();
+  const threadRevisions = new Map<string, number>();
+  let revision = 0;
   let chain: Promise<unknown> = Promise.resolve();
   function serial<T>(fn: () => Promise<T>): Promise<T> {
-    const next = chain.then(fn);
+    const next = chain.then(() => fn());
     chain = next.catch(() => undefined);
     return next;
   }
@@ -44,115 +36,166 @@ export default async function plugin(bb: BbPluginApi) {
   async function saveConfig(next: DashboardConfig) {
     next = configSchema.parse(next);
     await bb.storage.kv.set("config-v1", next);
+    const beforeProjects = new Map(config.projects.map(project => [project.id, project]));
+    const afterProjects = new Map(next.projects.map(project => [project.id, project]));
+    for (const id of new Set([...beforeProjects.keys(), ...afterProjects.keys()])) {
+      const before = beforeProjects.get(id);
+      const after = afterProjects.get(id);
+      if (before?.enabled !== after?.enabled || before?.connectedAt !== after?.connectedAt)
+        projectRevisions.set(id, ++revision);
+    }
     config = next;
     publish();
     return next;
   }
   type Row = Awaited<ReturnType<typeof bb.sdk.threads.list>>[number];
-  function activity(t: Row): Activity {
-    return { ...t, runtimeStatus: t.runtime.displayStatus,
-      backgroundAgents: t.activity.activeBackgroundAgentCount,
-      backgroundCommands: t.activity.activeBackgroundCommandCount,
-      workflows: t.activity.activeWorkflowCount };
-  }
-  async function observe(rows: Row[]) {
+  const projectVersions = () => new Map(config.projects.filter(project => project.enabled).map(project => [project.id, projectRevisions.get(project.id) ?? 0]));
+  type ReadTicket = { revision: number; projects: Map<string, number> };
+  const readTicket = (): ReadTicket => ({ revision, projects: projectVersions() });
+  async function observe(rows: Row[], ticket: ReadTicket, current: () => boolean) {
     let changed = false;
+    let fresh = true;
     for (const row of rows) {
+      if (!current() || disposed) return false;
       const project = config.projects.find(p => p.id === row.projectId && p.enabled);
       if (!project || row.visibility === "hidden" || row.archivedAt !== null || row.deletedAt !== null) continue;
+      if (ticket.projects.get(row.projectId) !== (projectRevisions.get(row.projectId) ?? 0)) {
+        sync.requestProjects([row.projectId]); fresh = false; continue;
+      }
+      if ((threadRevisions.get(row.id) ?? 0) > ticket.revision) {
+        sync.requestThreads([row.id]); fresh = false; continue;
+      }
       const previous = tracked.get(row.id);
       const next = reconcileThread(previous, activity(row), project.connectedAt);
       if (next && JSON.stringify(previous) !== JSON.stringify(next)) {
         await bb.storage.kv.set("thread:" + row.id, next);
+        // A write already started cannot be cancelled. Mirror its confirmed
+        // result before releasing the queue, even if this read pass was stopped.
         tracked.set(row.id, next);
         changed = true;
+        if (!current() || disposed) return false;
       }
     }
     if (changed) publish();
+    return fresh;
   }
-  async function reconcileAll() {
+  async function reconcile(work: ActivitySyncWork, current: () => boolean, signal: AbortSignal) {
+    const startedProjects = projectVersions();
+    let fresh = true;
     try {
-      for (const project of config.projects.filter(p => p.enabled)) {
+      for (const project of config.projects.filter(p => p.enabled && (work.full || work.projects.includes(p.id)))) {
+        if (!config.projects.some(entry => entry.id === project.id && entry.enabled)
+          || startedProjects.get(project.id) !== (projectRevisions.get(project.id) ?? 0)) { fresh = false; continue; }
         // List results are arrays, not envelopes. Never truncate busy projects.
         for (let offset = 0; ; offset += 200) {
-          const rows = await bb.sdk.threads.list({ projectId: project.id, archived: false, includeHidden: false, limit: 200, offset });
-          await observe(rows);
-          if (rows.length < 200 || disposed) break;
+          if (!current() || disposed) return;
+          const ticket = readTicket();
+          const rows = await bb.sdk.threads.list({ projectId: project.id, archived: false, includeHidden: false, limit: 200, offset, signal });
+          if (!current() || disposed) return;
+          if (!await serial(() => observe(rows, ticket, current))) fresh = false;
+          if (rows.length < 200 || !current() || disposed) break;
+          if (startedProjects.get(project.id) !== (projectRevisions.get(project.id) ?? 0)) break;
         }
       }
-      syncedAt = Date.now();
-      if (syncError !== null) { syncError = null; publish(); }
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      if (syncError !== message) {
-        syncError = message;
-        bb.log.warn("Activity sync: " + syncError);
-        publish();
+      if (!work.full) {
+        for (let offset = 0; offset < work.threads.length; offset += 200) {
+          if (!current() || disposed) return;
+          const ticket = readTicket();
+          const rows = await bb.sdk.threads.list({ threadIds: work.threads.slice(offset, offset + 200), archived: false, includeHidden: false, limit: 200, signal });
+          if (!current() || disposed) return;
+          await serial(() => observe(rows, ticket, current));
+        }
       }
+      await serial(async () => {
+        if (!current() || disposed || !work.full) return;
+        const latest = projectVersions();
+        if (!fresh || latest.size !== startedProjects.size || [...latest].some(([id, value]) => startedProjects.get(id) !== value)) {
+          sync.requestFull(true); return;
+        }
+        syncedAt = Date.now(); syncError = null; publish();
+      });
+    } catch (cause) {
+      if (!current() || disposed) return;
+      await serial(async () => {
+        if (!current() || disposed) return;
+        const message = cause instanceof Error ? cause.message : String(cause);
+        if (syncError !== message) { syncError = message; bb.log.warn("Activity sync: " + message); publish(); }
+      });
+      throw cause;
     }
+  }
+  const sync = createActivitySync(reconcile);
+  function mutateConfig(mutation: ConfigMutation) {
+    return serial(async () => {
+      const ids = projectValidationIds(config, mutation);
+      if (ids !== null) {
+        const projects = await bb.sdk.projects.list({ includePersonal: true });
+        const known = new Set(projects.map(project => project.id));
+        if (ids.some(id => !known.has(id))) throw new Error("DASHBOARD_PROJECT_UNAVAILABLE");
+      }
+      const next = await saveConfig(changeConfiguration(config, mutation, Date.now()));
+      sync.requestProjects(mutation.method === "projects_set" ? next.projects.filter(project => project.enabled).map(project => project.id) : ids ?? []);
+      return next;
+    });
+  }
+  async function commitThreadAction(next: TrackedThread) {
+    await bb.storage.kv.set("thread:" + next.id, next);
+    tracked.set(next.id, next);
+    threadRevisions.set(next.id, ++revision);
+  }
+  async function hideTrackedThread(threadId: string) {
+    const previous = tracked.get(threadId);
+    if (!previous || !config.projects.some(p => p.id === previous.projectId && p.enabled)) return { hidden: false };
+    const [row] = await bb.sdk.threads.list({ threadIds: [threadId], archived: false, limit: 1 });
+    if (!row) return { hidden: false };
+    await commitThreadAction(hideThread(previous, activity(row)));
+    const undoToken = randomUUID();
+    undoTokens.delete(threadId);
+    undoTokens.set(threadId, undoToken);
+    if (undoTokens.size > 100) undoTokens.delete(undoTokens.keys().next().value!);
+    publish();
+    return { hidden: true, undoToken };
+  }
+  async function restoreTrackedThread(threadId: string, undoToken: string) {
+    const previous = tracked.get(threadId);
+    if (undoTokens.get(threadId) !== undoToken || !previous || !config.projects.some(p => p.id === previous.projectId && p.enabled)) return { restored: false };
+    const [row] = await bb.sdk.threads.list({ threadIds: [threadId], archived: false, includeHidden: false, limit: 1 });
+    if (!row || row.visibility === "hidden" || row.archivedAt !== null || row.deletedAt !== null || row.projectId !== previous.projectId) return { restored: false };
+    await commitThreadAction({ ...previous, visible: true, latestAttentionAt: row.latestAttentionAt });
+    undoTokens.delete(threadId);
+    publish();
+    return { restored: true };
   }
   bb.rpc.register(rpcContract, {
     snapshot: () => serial(async () => {
-      // Realtime observation updates individual rows; reading a signal must not
-      // rescan every project's full history on each streaming delta.
-      if (syncedAt === null || syncError !== null || Date.now() - syncedAt >= 60_000) await reconcileAll();
-      return { config, tracked: [...tracked.values()].filter(t => config.projects.some(p => p.id === t.projectId && p.enabled)), syncError, syncedAt };
+      // Read confirmed state without awaiting SDK history. Initial snapshots may
+      // have syncedAt:null; the completed pass publishes another signal.
+      if (syncedAt === null || syncError !== null || Date.now() - syncedAt >= 60_000) sync.requestFull();
+      return structuredClone({ config, tracked: [...tracked.values()].filter(t => config.projects.some(p => p.id === t.projectId && p.enabled)), syncError, syncedAt });
     }),
-    projects_set: ({ ids, sharedPool: showPool }) => serial(async () => {
-      const projects = await bb.sdk.projects.list({ includePersonal: true });
-      const known = new Set(projects.map(p => p.id));
-      const selected = new Set(ids);
-      if (ids.some(projectId => !known.has(projectId))) throw new Error("DASHBOARD_PROJECT_UNAVAILABLE");
-      const now = Date.now();
-      const previous = new Map(config.projects.map(project => [project.id, project]));
-      const next = [...selected].map(id => ({ id, enabled: true, connectedAt: previous.get(id)?.connectedAt ?? now }));
-      next.push(...config.projects.filter(project => !selected.has(project.id)).map(project => ({ ...project, enabled: false })));
-      await saveConfig({ ...config, projects: next, sharedPool: showPool ?? config.sharedPool });
-      await reconcileAll();
-      return config;
-    }),
-    launcher_set: ({ items }) => serial(() => saveConfig({ ...config, launcher: [...new Map(items.map(i => [i.id, i])).values()] })),
-    thread_hide: ({ threadId }) => serial(async () => {
-      const previous = tracked.get(threadId);
-      if (!previous || !config.projects.some(p => p.id === previous.projectId && p.enabled)) return { hidden: false };
-      const [row] = await bb.sdk.threads.list({ threadIds: [threadId], archived: false, limit: 1 });
-      if (!row) return { hidden: false };
-      const next = hideThread(previous, activity(row));
-      await bb.storage.kv.set("thread:" + threadId, next);
-      tracked.set(threadId, next);
-      const undoToken = randomUUID();
-      undoTokens.delete(threadId);
-      undoTokens.set(threadId, undoToken);
-      if (undoTokens.size > 100) undoTokens.delete(undoTokens.keys().next().value!);
-      publish();
-      return { hidden: true, undoToken };
-    }),
-    thread_restore: ({ threadId, undoToken }) => serial(async () => {
-      const previous = tracked.get(threadId);
-      if (undoTokens.get(threadId) !== undoToken || !previous || !config.projects.some(p => p.id === previous.projectId && p.enabled)) return { restored: false };
-      const [row] = await bb.sdk.threads.list({ threadIds: [threadId], archived: false, includeHidden: false, limit: 1 });
-      if (!row || row.visibility === "hidden" || row.archivedAt !== null || row.deletedAt !== null || row.projectId !== previous.projectId) return { restored: false };
-      const next = { ...previous, visible: true, latestAttentionAt: row.latestAttentionAt };
-      await bb.storage.kv.set("thread:" + threadId, next);
-      tracked.set(threadId, next);
-      undoTokens.delete(threadId);
-      publish();
-      return { restored: true };
-    }),
+    projects_set: input => mutateConfig({ method: "projects_set", ...input }),
+    launcher_set: input => mutateConfig({ method: "launcher_set", ...input }),
+    catalog_change: change => mutateConfig({ method: "catalog_change", change }),
+    thread_hide: ({ threadId }) => serial(() => hideTrackedThread(threadId)),
+    thread_restore: ({ threadId, undoToken }) => serial(() => restoreTrackedThread(threadId, undoToken)),
   });
   bb.background.service("activity", {
     async start(signal) {
-      const dirty = new Set<string>();
-      let full = false;
-      const unsubscribe = bb.sdk.subscribe({ event: "thread:changed", callback: event => {
-        if (event.changes.some(change => ["thread-created", "status-changed", "queue-changed", "interactions-changed", "events-appended", "archived-changed", "thread-deleted"].includes(change))) {
-          if (event.id) dirty.add(event.id); else full = true;
-        }
-      } });
-      const reconnect = bb.sdk.subscribe({ event: "realtime:connection", callback: event => { if (event.state === "connected") full = true; } });
-      await serial(reconcileAll);
+      if (signal.aborted || disposed) return;
+      sync.start();
+      const stop = () => sync.stop();
+      signal.addEventListener("abort", stop, { once: true });
+      const subscriptions: (() => void)[] = [];
       let lastFull = Date.now();
       try {
+        subscriptions.push(bb.sdk.subscribe({ event: "thread:changed", callback: event => {
+          if (signal.aborted || disposed) return;
+          if (event.changes.some(change => ["thread-created", "status-changed", "queue-changed", "interactions-changed", "events-appended", "archived-changed", "thread-deleted"].includes(change))) {
+            if (event.id) sync.requestThreads([event.id]); else sync.requestFull(true);
+          }
+        } }));
+        subscriptions.push(bb.sdk.subscribe({ event: "realtime:connection", callback: event => { if (!signal.aborted && !disposed && event.state === "connected") sync.requestFull(true); } }));
+        sync.requestFull();
         while (!signal.aborted) {
           await new Promise<void>(resolve => {
             const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
@@ -161,19 +204,10 @@ export default async function plugin(bb: BbPluginApi) {
             if (signal.aborted) done();
           });
           if (signal.aborted) break;
-          const ids = [...dirty]; dirty.clear();
-          if (full || Date.now() - lastFull >= 60_000) {
-            full = false; lastFull = Date.now(); await serial(reconcileAll);
-          } else if (ids.length) {
-            await serial(async () => {
-              try {
-                for (let offset = 0; offset < ids.length; offset += 200) await observe(await bb.sdk.threads.list({ threadIds: ids.slice(offset, offset + 200), archived: false, limit: 200 }));
-              } catch (cause) { syncError = String(cause); full = true; publish(); }
-            });
-          }
+          if (Date.now() - lastFull >= 60_000) { lastFull = Date.now(); sync.requestFull(); }
         }
-      } finally { unsubscribe(); reconnect(); }
+      } finally { signal.removeEventListener("abort", stop); subscriptions.reverse().forEach(unsubscribe => unsubscribe()); sync.stop(); }
     },
   });
-  bb.onDispose(() => { disposed = true; });
+  bb.onDispose(() => { disposed = true; sync.stop(); });
 }

@@ -21,6 +21,16 @@ export interface TrackedThread {
   latestAttentionAt: number;
   hiddenAttentionAt: number;
 }
+/** Explicit adapters for the two public SDK activity shapes. */
+export function sidebarActivity(t: Activity & { activity: { backgroundAgents: number; backgroundCommands: number; workflows: number } }): Activity {
+  return { ...t, backgroundAgents: t.activity.backgroundAgents, backgroundCommands: t.activity.backgroundCommands, workflows: t.activity.workflows };
+}
+export function serverActivity(t: Activity & { runtime: { displayStatus: string }; activity: { activeBackgroundAgentCount: number; activeBackgroundCommandCount: number; activeWorkflowCount: number } }): Activity {
+  return { ...t, runtimeStatus: t.runtime.displayStatus,
+    backgroundAgents: t.activity.activeBackgroundAgentCount,
+    backgroundCommands: t.activity.activeBackgroundCommandCount,
+    workflows: t.activity.activeWorkflowCount };
+}
 export function isWorking(t: Activity): boolean {
   return ["active", "starting", "stopping", "pending"].includes(t.status)
     || ["provisioning", "waiting-for-host"].includes(t.runtimeStatus ?? "")

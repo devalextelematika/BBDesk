@@ -1,6 +1,6 @@
 # Third-party notices
 
-The vendored UI components in components/ui, hooks and lib include code adapted from the BB plugin registry and shadcn/ui. The following upstream notices are retained. Installed npm dependencies retain their own licenses in their packages.
+UI source was originally adapted from the BB plugin registry and shadcn/ui (registry version desktop-v0.48.0). Unused components and their helper modules have since been removed. The following upstream notices are retained for the remaining source and adapted material. Installed npm dependencies retain their own licenses in their packages.
 
 ## BB plugin registry
 
