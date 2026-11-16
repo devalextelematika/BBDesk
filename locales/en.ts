@@ -1,4 +1,5 @@
 export const en = {
+  completedAt: "Completed at {time}",
   workspaceSettings: "Configure projects and applications",
   catalogAppMembership: "In menu",
   catalogProjectMembership: "In bar",

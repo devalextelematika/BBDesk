@@ -4,6 +4,7 @@ export const corruptText = /(?:Р[А-Яа-яЁёЀ-ӿ\u00A0-\u00BF]|С[Ђ-Џ\u00
 const sources = ["app.tsx", "launcher-navigation.tsx", "launcher-panel.tsx", "project-tabs.tsx", "thread-tabs.tsx", "server.ts", "state.ts", "package.json", "components/ui/icon.tsx", "components/thread-indicator.tsx", "i18n.ts", "use-translation.ts", "locales/en.ts", "locales/ru.ts", "README.md", "PLUGIN_OVERVIEW.md", "docs/PUBLISHING.md", "skills/dashboard/SKILL.md"];
 sources.push("split-layout.ts", "split-workspace.tsx", "catalog.tsx", "catalog-model.ts", "catalog-config.ts", "hooks/use-catalog-actions.ts", "activity-sync.ts", "contracts.ts", "configuration.ts", "docs/RPC_COMPATIBILITY.md");
 sources.push("workspace-selectors.ts", "hooks/use-dashboard-snapshot.ts");
+sources.push("thread-completion.ts", "hooks/use-thread-completion.ts");
 sources.push("workspace-transitions.ts", "hooks/use-workspace.ts", "hooks/use-workspace-actions.ts", "docs/WORKSPACE_TRANSITIONS.md");
 const workspaceViews = ["components/project-workspace.tsx", "components/shared-pool-workspace.tsx", "components/workspace-chat.tsx", "components/workspace-button.tsx"];
 sources.push("workspace-view-models.ts", ...workspaceViews);

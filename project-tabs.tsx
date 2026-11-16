@@ -83,7 +83,7 @@ export function ProjectTabs({ projects, activeId, onSelect, onCreate, onReorder,
   return <div ref={root} className="db-project-tabs" role="tablist" aria-label={label ?? tr("projects")}>
     {tabs.map(project => {
       const active = project.id === activeId;
-      const summary = tr("projectSummary", { working: project.running, attention: project.attention, queued: project.queued, results: project.states.filter(state => state.tone === "result" || state.tone === "read").length });
+      const summary = tr("projectSummary", { working: project.running, attention: project.attention, queued: project.queued, results: project.states.filter(state => ["result", "completed", "read"].includes(state.tone)).length });
       const description = !project.available ? tr("unavailableProject") : project.states.length ? summary : project.total ? tr("results") : tr("noActivity");
       const ordered = [...project.states].sort((a, b) => a.id.localeCompare(b.id));
       const threads = ordered.map(state => state.providerId ? `${state.title}: ${state.text} (${providerLabel(state.providerId, directory.providers)})` : `${state.title}: ${state.text}`).join("; ");
@@ -147,7 +147,7 @@ export function SharedPoolButton({ name, help, pressed, drop, states, queued, co
     working: ordered.filter(state => state.tone === "running").length,
     attention: ordered.filter(state => state.tone === "attention").length,
     queued,
-    results: ordered.filter(state => state.tone === "result" || state.tone === "read").length,
+    results: ordered.filter(state => ["result", "completed", "read"].includes(state.tone)).length,
   });
   const threads = ordered.map(state => state.providerId ? `${state.title}: ${state.text} (${providerLabel(state.providerId, directory.providers)})` : `${state.title}: ${state.text}`).join("; ");
   return <button type="button" className="db-pool-toggle" data-drop={drop || undefined} aria-pressed={pressed} aria-controls={controls}

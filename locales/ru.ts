@@ -1,6 +1,7 @@
 import type { Messages } from "../i18n";
 
 export const ru = {
+  completedAt: "Завершено в {time}",
   workspaceSettings: "Настроить проекты и приложения",
   catalogAppMembership: "В меню",
   catalogProjectMembership: "В полосе",

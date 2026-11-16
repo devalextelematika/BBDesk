@@ -21,6 +21,7 @@ export function ThreadIndicator({ tone, title, subagent = false }: { tone: strin
     };
   }, [working]);
   return <span ref={element} className={`db-dot ${tone}${working ? " db-working" : ""}`} title={title} aria-hidden="true">
+    {tone === "completed" && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" focusable="false"><path d="m5 12 4 4L19 6"/></svg>}
     {working && (subagent ? <svg className="db-subagent-working" width="12" height="12" viewBox="0 0 24 24" focusable="false">
       <g transform="translate(-2 2)"><g className="db-working-ring">
         <circle cx="12" cy="12" r="6.5" pathLength="100" strokeDasharray="16 9" transform="rotate(16.2 12 12)"/>

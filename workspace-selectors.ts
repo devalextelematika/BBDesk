@@ -6,13 +6,14 @@ import type { ThreadTab } from "./thread-tabs";
 import type { SharedPool, SplitLayout } from "./split-layout";
 import type { ConversationChoice } from "./workspace-memory";
 import { hasWork, isWorking, isSubagent, isFinishedSubagent, sidebarActivity, type TrackedThread } from "./state";
+import type { Completion } from "./thread-completion";
 
 type Live = ReturnType<typeof experimental_useSidebarThreads>;
-export type Thread = Live["threads"][number];
+export type Thread = Live["threads"][number] & { completion?: Completion };
 type PendingCreated = { id: string; projectId: string } | null;
 export const visibleThread = (t: Thread) => !t.isHidden && !t.isArchived;
 export const conversationThread = (t: Thread) => visibleThread(t) && !isSubagent(t);
-export const needsAttention = (t: Thread) => t.hasPendingInteraction || t.status === "error" || t.queuedWork === "failed" || t.isUnread && !isWorking(sidebarActivity(t));
+export const needsAttention = (t: Thread) => t.hasPendingInteraction || t.status === "error" || t.queuedWork === "failed" || (t.completion ? t.completion.pending && !t.completion.viewed : t.isUnread) && !isWorking(sidebarActivity(t));
 export const compareThreads = (a: Thread, b: Thread) => Number(needsAttention(b)) - Number(needsAttention(a)) || Number(isWorking(sidebarActivity(b))) - Number(isWorking(sidebarActivity(a))) || b.latestAttentionAt - a.latestAttentionAt || a.id.localeCompare(b.id);
 export function compareThreadCreation(a: { id: string; createdAt?: number | null }, b: { id: string; createdAt?: number | null }) {
   return (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id);
@@ -27,13 +28,18 @@ export function threadState(t: Thread): { message: MessageKey; tone: string } {
   if (t.status === "stopping") return { message: "stopping", tone: "running" };
   if (isWorking(sidebarActivity(t))) return { message: isSubagent(t) ? "subagentWorking" : "working", tone: "running" };
   if (t.queuedWork === "waiting") return { message: "queued", tone: "waiting" };
-  if (t.isUnread) return { message: "newReply", tone: "result" };
+  if (t.completion?.pending) return { message: t.completion.viewed ? "completedAt" : "newReply", tone: t.completion.viewed ? "completed" : "result" };
+  if (t.isUnread && !t.completion?.at) return { message: "newReply", tone: "result" };
   if (t.status !== "idle") return { message: "unknownState", tone: "unknown" };
   return { message: "read", tone: "read" };
 }
 export function statusOf(t: Thread, tr: Translator) {
   const state = threadState(t);
-  return { text: tr(state.message), tone: state.tone };
+  const time = t.completion?.at ? new Date(t.completion.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
+  return { text: tr(state.message, { time }), tone: state.tone };
+}
+export function completionTooltip(t: Thread, tr: Translator) {
+  return t.completion?.at ? tr("completedAt", { time: new Date(t.completion.at).toLocaleString("en-GB", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) }) : "";
 }
 function firstById<T extends { id: string }>(rows: readonly T[]) {
   const result = new Map<string, T>();
@@ -114,7 +120,7 @@ export function selectProjectTabs(model: WorkspaceModel, tr: Translator) {
 }
 export function selectThreadTabs(rows: readonly Thread[], workingIds: ReadonlySet<string>, drafts: ReadonlySet<string>, tr: Translator): ThreadTab[] {
   return rows.map(t => ({ id: t.id, createdAt: t.createdAt, title: t.displayTitle,
-    detail: t.environment?.name ?? t.environment?.branchName ?? t.host?.name ?? tr("environment"),
+    detail: [t.environment?.name ?? t.environment?.branchName ?? t.host?.name ?? tr("environment"), completionTooltip(t, tr)].filter(Boolean).join(" · "),
     tone: statusOf(t, tr).tone, status: statusOf(t, tr).text, canHide: workingIds.has(t.id) && !hasWork(sidebarActivity(t)) && !drafts.has(t.id) }));
 }
 export function selectProjectWorkspace(model: WorkspaceModel, projectId: string, layout: SplitLayout | undefined, { opened, historyOpened, pendingCreated }: {
@@ -139,13 +145,13 @@ export function selectPoolWorkspace(model: WorkspaceModel, pool: SharedPool, pen
     const pending = pendingThreads.get(entry.threadId) === entry.projectId;
     return { id: entry.threadId, projectId: entry.projectId, projectConnected: model.connectedById.has(entry.projectId), thread, pending,
       title: thread?.displayTitle ?? (pending ? tr("openingThread") : tr("unavailable")),
-      caption: namedProject(model, entry.projectId, tr), state: thread ? statusOf(thread, tr) : null };
+      caption: namedProject(model, entry.projectId, tr), completionDetail: thread ? completionTooltip(thread, tr) : "", state: thread ? statusOf(thread, tr) : null };
   });
   return { rows, byId: firstById(rows),
     states: rows.map(row => ({ id: row.id, title: row.title, text: row.state?.text ?? tr("projectUnavailable"), tone: row.state?.tone ?? "unknown", subagent: !!row.thread && isSubagent(row.thread), providerId: row.thread?.providerId })),
     queued: rows.filter(row => row.thread?.queuedWork === "waiting").length,
     createProjectId: rows.find(row => row.id === (pool.active || rows[0]?.id))?.projectId ?? activeProjectId ?? model.connected[0]?.id ?? "",
     tabs: rows.map(row => ({ id: row.id, projectId: row.projectId, createdAt: row.thread?.createdAt, title: row.title, caption: row.caption,
-      detail: row.thread?.environment?.name ?? row.thread?.environment?.branchName ?? row.thread?.host?.name ?? tr("environment"),
+      detail: [row.thread?.environment?.name ?? row.thread?.environment?.branchName ?? row.thread?.host?.name ?? tr("environment"), row.thread && completionTooltip(row.thread, tr)].filter(Boolean).join(" · "),
       tone: row.state?.tone ?? "unknown", status: row.state?.text ?? tr("unavailable"), canHide: false })) };
 }

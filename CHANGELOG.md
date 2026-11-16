@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.8 — 2026-11-16
+
+- Sort projects and applications alphabetically by their displayed names in Catalog settings. Sorting follows the interface language and ignores letter case, including when searching.
+- Preserve the saved order of connected projects and application shortcuts in their workspace panels.
+- Keep a green completion check and completion time on the selected conversation until leaving it. Background results remain green until selected and left, including in split layouts and Shared pool. A new run replaces the check with work status.
+
+A patch update from 0.1.7. See [release notes](docs/releases/v0.1.8.md) for verification results and limits.
+
 ## 0.1.7 — 2026-11-07
 
 - Replace separate setup forms with a searchable Catalog containing Projects and Applications tabs. Checkbox changes apply immediately and keep Catalog, the current project and native chat mounted. Connected entries are green; Common threads and Shared pool have separate checkboxes.

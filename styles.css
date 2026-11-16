@@ -282,6 +282,8 @@
 @media(prefers-reduced-motion:reduce) { .db-working-ring { animation:none; } }
 .db-state.running, .db-state.waiting { color:color-mix(in srgb,var(--db-running) 65%,var(--foreground)); }
 .db-dot.result { background:var(--success); }
+.db-dot.completed { display:inline-flex; width:12px; height:12px; background:transparent; border-radius:0; color:color-mix(in srgb,var(--success) 70%,var(--foreground)); }
+.db-state.completed { color:color-mix(in srgb,var(--success) 70%,var(--foreground)); }
 .db-state.result { color:color-mix(in srgb,var(--success) 70%,var(--foreground)); }
 .db-dot.attention { background:#eab308; }
 .db-state.attention { color:var(--warning-text,var(--warning)); }

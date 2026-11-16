@@ -4,7 +4,12 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
-## What's new in 0.1.7
+## What's new in 0.1.8
+
+- **Alphabetical Catalog:** Projects and applications in Catalog settings are sorted by their displayed names using the interface language, ignoring letter case. Search results use the same order. The saved order in workspace panels is preserved.
+- **Completion acknowledgement:** A selected conversation keeps a green completion check and time until you leave it. Background results stay green until selected and left, including in split layouts and Shared pool. Starting another run restores work status. Completion acknowledgement and observed times are local to the mounted workspace; timestamps remain in tooltips after acknowledgement.
+
+## Highlights from 0.1.7
 
 - **Searchable Catalog:** Connect projects and applications from two tabs with immediate checkbox changes. Open it from the small settings button in the top toolbar; reorder connected entries in their own panels.
 - **Immediate hiding:** Conversation tabs disappear as soon as hiding succeeds, including in More. Background completion preserves the current conversation; failures leave the tab available.
@@ -159,7 +164,7 @@ Existing RPC methods and whole-list replacement behavior remain available. See [
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-Version `0.1.7` is a patch update from `0.1.6`. See the [changelog](CHANGELOG.md) and [v0.1.7 release notes](docs/releases/v0.1.7.md) for changes, verification and remaining acceptance checks. Install this exact release with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.7`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
+Version `0.1.8` is a patch update from `0.1.7`. See the [changelog](CHANGELOG.md) and [v0.1.8 release notes](docs/releases/v0.1.8.md) for changes, verification and remaining acceptance checks. Install this exact release with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.8`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
 
 ## License
 

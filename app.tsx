@@ -15,6 +15,7 @@ import { ProjectTabs, SharedPoolButton } from "./project-tabs";
 
 import { sharedPoolComposer, selectionFields } from "./workspace-transitions";
 import { useWorkspace } from "./hooks/use-workspace";
+import { useThreadCompletion } from "./hooks/use-thread-completion";
 import { useWorkspaceActions } from "./hooks/use-workspace-actions";
 import { readThreadDrag, threadDragType, sharedPoolLimit, type PoolEntry } from "./split-layout";
 import { usePanelFocus } from "./hooks/use-panel-focus";
@@ -95,7 +96,9 @@ function DashboardPage() {
   }, []);
   usePanelFocus(historyRef, historyProject, historyOpener);
   const config = data?.config;
-  const workspace = createWorkspaceModel({ threads: live.threads, projects: live.projects, config, tracked: data?.tracked, drafts, opened });
+  const selectedThread = creating ? null : sharedPool.open ? sharedPool.active || sharedPool.entries[0]?.threadId || null : historyOpened ?? opened;
+  const completionThreads = useThreadCompletion(live.threads, selectedThread, live.status === "ready");
+  const workspace = createWorkspaceModel({ threads: completionThreads, projects: live.projects, config, tracked: data?.tracked, drafts, opened });
   const { current, connected, allThreads, runningCount, attentionCount } = workspace;
   const activeProject = workspace.connectedById.get(activeProjectId ?? "") ?? connected[0] ?? null;
   const { saving, hide, spawnProject, spawnPool } = useWorkspaceActions(controller, workspace, snapshot, sdk, tr);

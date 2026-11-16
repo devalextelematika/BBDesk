@@ -205,8 +205,10 @@ test("header indicators separate work, results and blocking decisions", async ()
   assert.equal(tab.querySelectorAll(".db-working-ring").length, 2);
   threads[0] = { ...threads[0], isUnread: false };
   await slot.behavior.emitRealtime("dashboard-changed", {});
-  assert.equal(tab.querySelectorAll(".db-dot.read").length, 2);
-  assert.equal(projectTab.querySelectorAll(".db-dot.read").length, 2);
+  assert.equal(tab.querySelectorAll(".db-dot.read").length, 1);
+  assert.equal(projectTab.querySelectorAll(".db-dot.read").length, 1);
+  assert.equal(tab.querySelectorAll(".db-dot.result").length, 2);
+  assert.equal(projectTab.querySelectorAll(".db-dot.result").length, 2);
 });
 
 test("header opens a specific thread across projects and keeps stable indicator order", async () => {

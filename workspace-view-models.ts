@@ -1,4 +1,4 @@
-import { conversationItem, statusOf, selectThreadTabs, type Thread, type WorkspaceModel, type selectProjectWorkspace, type selectPoolWorkspace } from "./workspace-selectors";
+import { conversationItem, completionTooltip, statusOf, selectThreadTabs, type Thread, type WorkspaceModel, type selectProjectWorkspace, type selectPoolWorkspace } from "./workspace-selectors";
 import type { SplitLayout } from "./split-layout";
 import type { Translator } from "./i18n";
 
@@ -19,7 +19,7 @@ export function projectWorkspaceView({ projectId, project, selected, threadsById
     const tab = rowById.get(thread.id) === thread ? tabById.get(thread.id) : undefined, state = tab ? { text: tab.status, tone: tab.tone } : statusOf(thread, tr);
     const metadata = conversationItem(thread);
     const result = { id: thread.id, title: thread.displayTitle, state, metadata, draft: drafts.has(thread.id),
-      heading: `${thread.displayTitle} · ${metadata.detail} · ${state.text}` };
+      heading: `${thread.displayTitle} · ${metadata.detail} · ${state.text}${completionTooltip(thread, tr) ? ` · ${completionTooltip(thread, tr)}` : ""}` };
     presentation.set(thread, result); return result;
   }
   const ids = selected.paneThreads.length ? selected.paneThreads.map(t => t.id) : selected.displayed ? [selected.displayed.id] : [];
@@ -42,7 +42,7 @@ export function sharedPoolWorkspaceView(pool: ReturnType<typeof selectPoolWorksp
   active: string; sizes: Record<string, number>; creating: boolean; saving: boolean; drafts: ReadonlySet<string>;
 }) {
   const rows = pool.rows.map(row => ({ id: row.id, title: row.title, caption: row.caption, state: row.state, draft: !!row.thread && drafts.has(row.thread.id),
-    heading: `${row.caption} · ${row.title}${row.state ? ` · ${row.state.text}` : ""}`, available: row.projectConnected && !!(row.thread || row.pending) }));
+    heading: [row.caption, row.title, row.state?.text, row.completionDetail].filter(Boolean).join(" · "), available: row.projectConnected && !!(row.thread || row.pending) }));
   return { ids: rows.map(row => row.id), rows: new Map(rows.map(row => [row.id, row])), activeId: active || rows[0]?.id || null, selectedId: active || null,
     sizes, creating, saving, createProjectId: pool.createProjectId, tabs: pool.tabs };
 }

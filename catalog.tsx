@@ -21,7 +21,7 @@ type Props = {
 
 export function Catalog(props: Props) {
   const { config, projects, apps, appsReady, initialFilter, change, onClose, opener } = props;
-  const { t: tr } = useTranslation();
+  const { t: tr, language } = useTranslation();
   const action = useCatalogActions(change);
   const root = useRef<HTMLElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -54,7 +54,8 @@ export function Catalog(props: Props) {
   }, [opener]);
   const q = query.trim().toLocaleLowerCase();
   const filtered = entries.filter(entry => filter === entry.kind
-    && `${entry.name} ${entry.originalName}`.toLocaleLowerCase().includes(q));
+    && `${entry.name} ${entry.originalName}`.toLocaleLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name, language, { sensitivity: "base" }));
   const errorText = String(action.error).includes("DASHBOARD_PROJECT_UNAVAILABLE") ? tr("projectGone") : String(action.error).includes("DASHBOARD_CATALOG_LIMIT") ? tr("catalogLimit") : String(action.error).includes("DASHBOARD_CATALOG_STALE") ? tr("catalogStale") : tr("actionFailed");
   return <section ref={root} className="db-catalog-overlay" role="dialog" aria-modal="true" aria-label={tr("catalogTitle")} onKeyDown={event => {
     if (event.defaultPrevented) return;
