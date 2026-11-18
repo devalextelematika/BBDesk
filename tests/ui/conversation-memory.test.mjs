@@ -108,6 +108,74 @@ test("finished subagents stay absent on mount while independent forks retain the
   assert.equal(slot.queryByText("Завершённый Research"), null);
 });
 
+test("unopened subagents disappear on background success while an ordinary result stays green", async () => {
+  const threads = [
+    thread("manager", "p1", "Manager", { status: "active", hasPendingInteraction: true }),
+    thread("linked", "p1", "Linked worker", { status: "active", parentThreadId: "manager" }),
+    thread("router", "p1", "Router worker", { status: "active", originPluginId: "delegation-router" }),
+    thread("fork", "p1", "Fork", { status: "active", parentThreadId: "manager", originKind: "fork" }),
+  ];
+  const slot = mount({ connected: true, language: "en", threads });
+  const chat = await slot.findByTestId("bb-thread-chat");
+  assert.equal(chat.dataset.threadId, "manager");
+  const header = slot.getByRole("group", { name: /^Threads across/ });
+  const projectTab = slot.container.querySelector(".db-project-tab");
+  const indicator = id => header.querySelector(`[data-thread-id="${id}"]`);
+  assert.ok(indicator("linked").querySelector(".db-dot.running"));
+  assert.ok(indicator("router").querySelector(".db-dot.running"));
+  for (const index of [1, 2, 3]) {
+    threads[index] = { ...threads[index], status: "idle", isUnread: true, indicator: "unread-success", latestAttentionAt: 210 };
+  }
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.equal(indicator("linked"), null);
+  assert.equal(indicator("router"), null);
+  assert.doesNotMatch(projectTab.getAttribute("aria-label"), /Linked worker|Router worker/);
+  assert.ok(indicator("fork").querySelector(".db-dot.result"));
+  const tabs = [...slot.container.querySelectorAll(".db-thread-tab")].map(tab => tab.textContent.trim());
+  assert.deepEqual(tabs.sort(), ["Fork", "Manager"]);
+  assert.equal(slot.getByTestId("bb-thread-chat"), chat);
+});
+
+test("a delegated worker returns to its historical manager after completion and keeps failures visible", async () => {
+  const threads = [
+    thread("manager", "p1", "Manager", { latestAttentionAt: 60 }),
+    thread("worker", "p1", "Worker", {
+      parentThreadId: "manager", lifecycleOwnerThreadId: null, originKind: null,
+      originPluginId: "delegation-router", status: "active", latestAttentionAt: 70,
+    }),
+    thread("other", "p1", "Other"),
+  ];
+  const slot = mount({ connected: true, language: "en", threads, hiddenIds: ["manager", "worker"] });
+  const strip = await slot.findByRole("group", { name: /^Threads across/ });
+  const projectTab = await slot.findByRole("tab", { name: /^Тестовый проект,/ });
+  const workerButton = () => strip.querySelector('[data-thread-id="worker"]');
+  const bottom = () => [...slot.container.querySelectorAll(".db-thread-tab")].map(tab => tab.textContent.trim());
+  assert.deepEqual(bottom(), ["Other"]);
+  fireEvent.click(workerButton());
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "worker");
+
+  threads[1] = { ...threads[1], status: "error" };
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.ok(workerButton().querySelector(".db-dot.error"));
+  assert.ok(projectTab.querySelector(".db-dot.error"));
+  assert.deepEqual(bottom(), ["Other"]);
+
+  threads[1] = { ...threads[1], status: "idle", isUnread: true };
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.equal(workerButton(), null);
+  assert.doesNotMatch(projectTab.getAttribute("aria-label"), /Worker/);
+  assert.deepEqual(bottom(), ["Other"]);
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "manager");
+
+  threads[1] = { ...threads[1], status: "active" };
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.ok(workerButton().querySelector(".db-dot.running"));
+  threads[1] = { ...threads[1], status: "idle" };
+  await slot.behavior.emitRealtime("dashboard-changed", {});
+  assert.equal(workerButton(), null);
+  assert.equal(slot.getByTestId("bb-thread-chat").dataset.threadId, "manager");
+});
+
 test("a project with only a subagent shows its indicator without auto-opening its chat", async () => {
   const threads = [thread("worker", "p1", "Research", { parentThreadId: "manager", status: "active" })];
   const slot = mount({ connected: true, threads });

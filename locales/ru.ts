@@ -1,6 +1,12 @@
 import type { Messages } from "../i18n";
 
 export const ru = {
+  extraSettings: "Дополнительно",
+  internalSplitSetting: "Открывать приложения в сплите BBDesk",
+  internalSplitDescription: "Снимите флажок, чтобы использовать сплит BB. Настройка действует в этом браузере.",
+  openBbSplit: "Открыть в сплите BB",
+  moveAppPane: "Перетащите заголовок или нажмите Alt + ← / →, чтобы переместить колонку",
+  appLoading: "Загрузка приложения…",
   completedAt: "Завершено в {time}",
   workspaceSettings: "Настроить проекты и приложения",
   catalogAppMembership: "В меню",

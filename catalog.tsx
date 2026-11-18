@@ -6,7 +6,10 @@ import { useTranslation } from "./use-translation";
 import type { DashboardConfig } from "./contracts";
 
 export type CatalogFilter = "all" | "project" | "app";
+const tabs = ["project", "app", "settings"] as const;
 type Props = {
+  internalSplit: boolean;
+  onInternalSplit: (value: boolean) => void;
   config: DashboardConfig;
   projects: readonly { id: string; name: string; isPersonal: boolean }[];
   apps: readonly { id: string; label: string; isDisabled: boolean; isLoading: boolean }[];
@@ -25,7 +28,7 @@ export function Catalog(props: Props) {
   const action = useCatalogActions(change);
   const root = useRef<HTMLElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const [filter, setFilter] = useState<"project" | "app">(initialFilter === "app" ? "app" : "project");
+  const [filter, setFilter] = useState<typeof tabs[number]>(initialFilter === "app" ? "app" : "project");
   const [query, setQuery] = useState("");
   const busy = action.pending;
   const entries = catalogEntries(config, projects, apps);
@@ -75,17 +78,21 @@ export function Catalog(props: Props) {
     <div className="db-catalog-window">
       <header className="db-catalog-heading"><div><h2>{tr("catalogTitle")}</h2><p>{tr("catalogSubtitle")}</p></div><button type="button" className="db-button" onClick={onClose}>{tr("catalogDone")}</button></header>
       <div className="db-catalog-tabs" role="tablist" aria-label={tr("catalogTitle")}>
-        {(["project", "app"] as const).map(kind => <button key={kind} id={`db-catalog-tab-${kind}`} type="button" role="tab"
+        {tabs.map(kind => <button key={kind} id={`db-catalog-tab-${kind}`} type="button" role="tab"
           aria-selected={filter === kind} aria-controls="db-catalog-panel" tabIndex={filter === kind ? 0 : -1}
           onClick={() => setFilter(kind)} onKeyDown={event => {
             if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
               event.preventDefault();
-              const next = event.key === "Home" ? "project" : event.key === "End" ? "app" : filter === "project" ? "app" : "project";
+              const next = event.key === "Home" ? "project" : event.key === "End" ? "settings" : tabs[(tabs.indexOf(kind) + (event.key === "ArrowLeft" ? 2 : 1)) % tabs.length]!;
               setFilter(next); root.current?.querySelector<HTMLButtonElement>(`#db-catalog-tab-${next}`)?.focus();
             }
-          }}>{tr(kind === "project" ? "projects" : "catalogApps")}</button>)}
+          }}>{tr(kind === "settings" ? "extraSettings" : kind === "project" ? "projects" : "catalogApps")}</button>)}
       </div>
       <div className="db-catalog-browse" role="tabpanel" id="db-catalog-panel" aria-labelledby={`db-catalog-tab-${filter}`}>
+        {filter === "settings" ? <div className="db-catalog-special"><label>
+          <input type="checkbox" checked={props.internalSplit} onChange={event => props.onInternalSplit(event.target.checked)}/>
+          {tr("internalSplitSetting")}
+        </label><p className="db-muted">{tr("internalSplitDescription")}</p></div> : <>
         <input ref={input} className="db-input" aria-label={tr("catalogSearch")} placeholder={tr("catalogSearch")} type="search" value={query} onChange={event => setQuery(event.target.value)}/>
         <div className="db-catalog-results" aria-busy={busy}>
           {filter === "project" && props.projectsStatus !== "ready" && <p role="status" className="db-muted">{tr(props.projectsStatus === "error" ? "syncFailed" : "loadingProjects")}</p>}
@@ -109,6 +116,7 @@ export function Catalog(props: Props) {
           {personal && <label><input type="checkbox" disabled={busy} checked={config.projects.some(entry => entry.id === personal.id && entry.enabled)} onChange={event => void action.run({ type: event.target.checked ? "add" : "remove", kind: "project", id: personal.id })}/>{tr("commonThreads")}</label>}
           <label><input type="checkbox" disabled={busy} checked={config.sharedPool !== false} onChange={event => void action.run({ type: "pool", enabled: event.target.checked })}/>{tr("sharedPool")}</label>
         </div>}
+        </>}
       </div>
       <footer className="db-catalog-footer">
         {action.error ? <div role="alert">{errorText} <button type="button" className="db-button" onClick={() => action.retry?.()} disabled={busy}>{tr("retry")}</button></div> : <span role="status">{busy ? tr("saving") : tr("catalogImmediate")}</span>}

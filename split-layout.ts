@@ -51,6 +51,31 @@ function validId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 200;
 }
 
+export const appWorkspaceId = "";
+const appSplitStorageKey = "bb-dashboard:app-split-layout:v1";
+export type AppSplitLayout = { appIds: string[]; order: string[]; sizes: Record<string, number> };
+export const emptyAppSplit = (): AppSplitLayout => ({ appIds: [], order: [], sizes: {} });
+
+export function readAppSplit(): AppSplitLayout {
+  try {
+    const row = JSON.parse(window.localStorage.getItem(appSplitStorageKey) ?? "null") as Partial<AppSplitLayout> | null;
+    if (!Array.isArray(row?.appIds)) return emptyAppSplit();
+    const appIds = [...new Set(row.appIds.filter(validId))].slice(0, 100);
+    const ids = new Set([appWorkspaceId, ...appIds]);
+    const order = Array.isArray(row.order) ? [...new Set(row.order.filter(id => ids.has(id)))] : [];
+    const sizes = Object.fromEntries(Array.from(ids).flatMap(id => {
+      const size = row.sizes?.[id];
+      return typeof size === "number" && Number.isFinite(size) && size > 0 ? [[id, size]] : [];
+    }));
+    return { appIds, order, sizes };
+  } catch { return emptyAppSplit(); }
+}
+
+export function saveAppSplit(layout: AppSplitLayout) {
+  try { window.localStorage.setItem(appSplitStorageKey, JSON.stringify(layout)); }
+  catch { /* The layout still works with blocked browser storage. */ }
+}
+
 export function readThreadDrag(transfer: { getData(type: string): string }): PoolEntry | null {
   try {
     const data: unknown = JSON.parse(transfer.getData(threadDragType) || "null");

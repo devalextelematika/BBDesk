@@ -5,6 +5,7 @@ export interface Activity {
   parentThreadId?: string | null;
   lifecycleOwnerThreadId?: string | null;
   originKind?: string | null;
+  originPluginId?: string | null;
   status: string;
   runtimeStatus?: string;
   queuedWork: string;
@@ -40,21 +41,32 @@ export function isWorking(t: Activity): boolean {
 export function hasWork(t: Activity): boolean {
   return isWorking(t) || t.queuedWork !== "none" || t.hasPendingInteraction;
 }
+export function subagentOwnerId(t: Pick<Activity, "lifecycleOwnerThreadId" | "parentThreadId" | "originKind">): string | null {
+  if (t.lifecycleOwnerThreadId) return t.lifecycleOwnerThreadId;
+  // Delegated children can have only a parent, while independent forks also have ancestry.
+  return t.originKind === "fork" ? null : t.parentThreadId || null;
+}
 export function isSubagent(t: Activity): boolean {
-  return !!t.lifecycleOwnerThreadId || !!t.parentThreadId && t.originKind !== "fork";
+  // Delegation Router creates worker threads and stamps them with its plugin ID.
+  return subagentOwnerId(t) !== null || (t.originKind !== "fork" && t.originPluginId === "delegation-router");
+}
+export function hasThreadFailure(t: Pick<Activity, "queuedWork" | "status">): boolean {
+  return t.status === "error" || t.queuedWork === "failed";
 }
 export function isFinishedSubagent(t: Activity): boolean {
-  return isSubagent(t) && !hasWork(t) && t.status !== "error";
+  // Read state and the selected chat affect the badge, never the worker's lifecycle.
+  return isSubagent(t) && !hasWork(t) && !hasThreadFailure(t);
 }
 export function reconcileThread(previous: TrackedThread | undefined, t: Activity, connectedAt: number): TrackedThread | undefined {
   if (isFinishedSubagent(t)) return previous ? {
     ...previous, visible: false, latestAttentionAt: t.latestAttentionAt,
     hiddenAttentionAt: Math.max(previous.hiddenAttentionAt, t.latestAttentionAt),
   } : undefined;
-  if (!previous && !hasWork(t) && t.latestAttentionAt <= connectedAt) return undefined;
+  const needsTracking = hasWork(t) || (isSubagent(t) && hasThreadFailure(t));
+  if (!previous && !needsTracking && t.latestAttentionAt <= connectedAt) return undefined;
   return {
     id: t.id, projectId: t.projectId,
-    visible: previous?.visible === true || hasWork(t)
+    visible: previous?.visible === true || needsTracking
       || t.latestAttentionAt > (previous?.hiddenAttentionAt ?? connectedAt),
     latestAttentionAt: t.latestAttentionAt,
     hiddenAttentionAt: previous?.hiddenAttentionAt ?? 0,

@@ -43,7 +43,8 @@ export function sharedPoolWorkspaceView(pool: ReturnType<typeof selectPoolWorksp
 }) {
   const rows = pool.rows.map(row => ({ id: row.id, title: row.title, caption: row.caption, state: row.state, draft: !!row.thread && drafts.has(row.thread.id),
     heading: [row.caption, row.title, row.state?.text, row.completionDetail].filter(Boolean).join(" · "), available: row.projectConnected && !!(row.thread || row.pending) }));
-  return { ids: rows.map(row => row.id), rows: new Map(rows.map(row => [row.id, row])), activeId: active || rows[0]?.id || null, selectedId: active || null,
+  const selectedId = pool.byId.has(active) ? active : null;
+  return { ids: rows.map(row => row.id), rows: new Map(rows.map(row => [row.id, row])), activeId: selectedId ?? rows[0]?.id ?? null, selectedId,
     sizes, creating, saving, createProjectId: pool.createProjectId, tabs: pool.tabs };
 }
 export type SharedPoolWorkspaceView = ReturnType<typeof sharedPoolWorkspaceView>;

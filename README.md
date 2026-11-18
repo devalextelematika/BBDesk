@@ -4,6 +4,11 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
+## What's new in 0.1.9
+
+- **Application split:** Enable **Open applications in a BBDesk split** under **Catalog → More settings**. Open applications alongside chat, resize them with the divider and drag their violet-tinted headers to rearrange them.
+- **Delegated work:** Active and failed worker threads remain visible. When the selected worker finishes successfully, BBDesk returns to its managing conversation if available.
+
 ## What's new in 0.1.8
 
 - **Alphabetical Catalog:** Projects and applications in Catalog settings are sorted by their displayed names using the interface language, ignoring letter case. Search results use the same order. The saved order in workspace panels is preserved.
@@ -41,7 +46,7 @@ Drag a bottom thread tab or a conversation from the history panel into the works
 - Hidden tabs disappear as soon as hiding succeeds, without a timed placeholder. Hiding the current conversation selects a neighboring tab; hiding a background conversation keeps the current chat open.
 - Start a thread with its project preselected in BB's native composer.
 - Change permission mode before the next prompt in an existing thread. New threads start with the last mode successfully used in BBDesk, remembered in this browser; BB still enforces provider and machine limits.
-- Open registered application screens here or alongside using BB's native split action.
+- Open registered application screens here, in BB's native split, or in a resizable column in BBDesk.
 - Collapse and resize the application panel; its layout is remembered in your browser.
 - Follow delegated agents through activity indicators without retaining completed subagent rows.
 
@@ -164,7 +169,7 @@ Existing RPC methods and whole-list replacement behavior remain available. See [
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-Version `0.1.8` is a patch update from `0.1.7`. See the [changelog](CHANGELOG.md) and [v0.1.8 release notes](docs/releases/v0.1.8.md) for changes, verification and remaining acceptance checks. Install this exact release with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.8`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
+Version `0.1.9` is a patch update from `0.1.8`. See the [changelog](CHANGELOG.md) and [v0.1.9 release notes](docs/releases/v0.1.9.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.9`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
 
 ## License
 

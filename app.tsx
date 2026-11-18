@@ -7,6 +7,7 @@ import {
   useSidebarThreadDraftIds as useDraftIds,
   experimental_usePluginId as usePluginId,
 } from "@get-bb/plugin-sdk/app";
+import { ApplicationWorkspace, EmbeddedLaunch, embeddedTarget } from "./components/application-workspace";
 import { Catalog } from "./catalog";
 import type { CatalogChange } from "./catalog-config";
 import { Icon } from "./components/ui/icon";
@@ -17,7 +18,7 @@ import { sharedPoolComposer, selectionFields } from "./workspace-transitions";
 import { useWorkspace } from "./hooks/use-workspace";
 import { useThreadCompletion } from "./hooks/use-thread-completion";
 import { useWorkspaceActions } from "./hooks/use-workspace-actions";
-import { readThreadDrag, threadDragType, sharedPoolLimit, type PoolEntry } from "./split-layout";
+import { readThreadDrag, threadDragType, sharedPoolLimit, emptyAppSplit, readAppSplit, saveAppSplit, type PoolEntry } from "./split-layout";
 import { usePanelFocus } from "./hooks/use-panel-focus";
 import { useMobileComposerViewport } from "./hooks/use-mobile-composer-viewport";
 import { isSubagent, isFinishedSubagent, sidebarActivity as activity } from "./state";
@@ -33,7 +34,7 @@ import { projectWorkspaceView, sharedPoolWorkspaceView } from "./workspace-view-
 import "./styles.css";
 
 import { useDashboardSnapshot } from "./hooks/use-dashboard-snapshot";
-import { createWorkspaceModel, statusOf, projectEntryThread as selectProjectEntryThread, namedProject as selectProjectName, selectProjectTabs, selectProjectWorkspace, selectPoolWorkspace, type Thread } from "./workspace-selectors";
+import { createWorkspaceModel, statusOf, projectEntryThread as selectProjectEntryThread, namedProject as selectProjectName, selectProjectTabs, selectProjectWorkspace, selectPoolWorkspace, selectSubagentManager, type Thread } from "./workspace-selectors";
 
 function Empty({ children }: { children: ReactNode }) { return <div className="db-empty" role="status">{children}</div>; }
 function ConnectionWarning() {
@@ -52,6 +53,25 @@ function ConnectionWarning() {
 function DashboardPage() {
   const { t: tr, language, isLoading: languageLoading } = useTranslation();
   const launcherPanel = useLauncherPanel();
+  const [internalSplit, setInternalSplit] = useState(() => {
+    try { return window.localStorage.getItem("bb-dashboard:internal-app-split") === "true"; }
+    catch { return false; }
+  });
+  const [appSplit, setAppSplit] = useState(() => internalSplit ? readAppSplit() : emptyAppSplit());
+  useEffect(() => saveAppSplit(appSplit), [appSplit]);
+  function changeSplitMode(value: boolean) {
+    setInternalSplit(value);
+    if (!value) setAppSplit(emptyAppSplit());
+    try { window.localStorage.setItem("bb-dashboard:internal-app-split", String(value)); }
+    catch { /* The selected mode still works for this session. */ }
+  }
+  function closeApp(id: string) {
+    setAppSplit(previous => {
+      const sizes = { ...previous.sizes };
+      delete sizes[id];
+      return { appIds: previous.appIds.filter(app => app !== id), order: previous.order.filter(app => app !== id), sizes };
+    });
+  }
   const snapshot = useDashboardSnapshot();
   const { rpc, data, error, setError, report, refresh, applyConfig, mounted } = snapshot;
   const sdk = useSdk();
@@ -96,6 +116,10 @@ function DashboardPage() {
   }, []);
   usePanelFocus(historyRef, historyProject, historyOpener);
   const config = data?.config;
+  const appPanes = appSplit.appIds.flatMap(id => {
+    const entry = config?.launcher.find(app => app.id === id);
+    return entry ? [entry] : [];
+  });
   const selectedThread = creating ? null : sharedPool.open ? sharedPool.active || sharedPool.entries[0]?.threadId || null : historyOpened ?? opened;
   const completionThreads = useThreadCompletion(live.threads, selectedThread, live.status === "ready");
   const workspace = createWorkspaceModel({ threads: completionThreads, projects: live.projects, config, tracked: data?.tracked, drafts, opened });
@@ -109,19 +133,14 @@ function DashboardPage() {
     if (live.status !== "ready" || !opened || current && !isFinishedSubagent(activity(current))) return;
     // Spawn can resolve before the sidebar's live view includes the new thread.
     if (pendingCreated?.id === opened && !current) return;
-    let manager = current;
-    const visited = new Set<string>();
-    while (manager && isSubagent(manager) && !visited.has(manager.id)) {
-      visited.add(manager.id);
-      const parentId = manager.lifecycleOwnerThreadId ?? manager.parentThreadId;
-      manager = parentId ? workspace.byId.get(parentId) : undefined;
-    }
-    if (manager && !isSubagent(manager) && workspace.workingIds.has(manager.id)) {
-      dispatch({ type: "selection.recover", projectId: manager.projectId, id: manager.id, expectedSelection: workspaceState.selection });
+    const manager = current && selectSubagentManager(workspace, current);
+    if (manager) {
+      dispatch({ type: "selection.recover", projectId: manager.projectId, id: manager.id,
+        history: !workspace.workingIds.has(manager.id), expectedSelection: workspaceState.selection });
     } else dispatch({ type: "selection.recover", id: activeProject ? projectEntryThread(activeProject.id)?.id ?? null : null, expectedSelection: workspaceState.selection });
   }, [live.status, live.threads, opened, current, allThreads, pendingCreated]);
   useEffect(() => {
-    if (live.status !== "ready" || !historyOpened || activeProject && workspace.visibleByProject.get(activeProject.id)?.has(historyOpened)) return;
+    if (live.status !== "ready" || !historyOpened || activeProject && workspace.conversationsByProject.get(activeProject.id)?.has(historyOpened)) return;
     dispatch({ type: "selection.recover", id: activeProject ? projectEntryThread(activeProject.id)?.id ?? null : null, expectedSelection: workspaceState.selection });
   }, [live.status, live.threads, historyOpened, activeProject?.id]);
   useEffect(() => {
@@ -322,7 +341,16 @@ function DashboardPage() {
             <button type="button" className="db-launch-main" draggable={false} disabled={unavailable} title={unavailable ? tr("appUnavailableHelp") : entry.label} onClick={() => navigation?.actions.activate(entry.id, { target: "current" })}>
               {item ? <NavigationIcon icon={item.icon} className="db-icon"/> : <Icon name="AppWindow" className="db-icon"/>}<span className="db-launch-label">{entry.label}{unavailable && <small>{tr("unavailable")}</small>}</span>
             </button>
-            <button type="button" className="db-launch-split" draggable={false} disabled={unavailable} title={tr("splitHelp")} aria-label={tr("openAlongside", { name: entry.label })} onClick={() => navigation?.actions.activate(entry.id, { target: "split" })}><Icon name="Columns2" className="db-icon"/></button>
+            <button type="button" className="db-launch-split" draggable={false} disabled={unavailable} title={internalSplit ? tr("openAlongside", { name: entry.label }) : tr("splitHelp")} aria-label={tr("openAlongside", { name: entry.label })} onClick={() => {
+              if (!internalSplit || item?.action?.kind !== "open-plugin-panel") { navigation?.actions.activate(entry.id, { target: "split" }); return; }
+              const existing = launcherPanel.root.current?.querySelectorAll<HTMLIFrameElement>("iframe[data-bbdesk-app]");
+              const pane = Array.from(existing ?? []).find(frame => frame.dataset.bbdeskApp === entry.id);
+              if (pane) { pane.focus(); pane.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }
+              else setAppSplit(previous => previous.appIds.includes(entry.id) ? previous : {
+                ...previous, appIds: [...previous.appIds, entry.id],
+              });
+              if (launcherPanel.overlayOpen) launcherPanel.close();
+            }}><Icon name="Columns2" className="db-icon"/></button>
           </div>;
         })}
         </div>
@@ -330,6 +358,12 @@ function DashboardPage() {
       <div className="db-launcher-resize" {...launcherPanel.resizeProps}/>
       </div>
       <div className="db-launcher-backdrop" aria-hidden="true" onClick={launcherPanel.close}/>
+      <ApplicationWorkspace panes={appPanes} order={appSplit.order} weights={appSplit.sizes}
+        setOrder={order => setAppSplit(previous => ({ ...previous, order }))}
+        setWeights={sizes => setAppSplit(previous => ({ ...previous, sizes }))}
+        close={closeApp} openInBB={id => {
+        navigation?.actions.activate(id, { target: "split" }); closeApp(id);
+      }}>
       <main ref={mainRef} className="db-main" aria-label={tr("workspace")} data-compact-workspace={compactWorkspace}>
         <div className="db-project-bar" data-shared-pool={sharedPool.open && sharedPoolEnabled || undefined}>
           <div className="db-project-tools">{data && projectTabs.some(project => project.common) && <ProjectTabs projects={projectTabs.filter(project => project.common)} label={tr("commonThreads")} activeId={sharedPool.open ? null : activeProject?.id ?? null} onSelect={selectProject} onCreate={createInProject}/>}{data && connected.length > 0 && sharedPoolEnabled && <><SharedPoolButton name={tr("sharedPool")} help={tr("sharedPoolHelp")} pressed={sharedPool.open} drop={threadDragging} states={poolStates} queued={poolQueued} controls={sharedPool.open ? "db-shared-pool" : undefined} onClick={showSharedPool} onDragOver={allowPoolDrop} onDrop={dropOnPool}/><button type="button" className="db-tab-create db-icon-btn" title={tr("newThreadTitle", { name: tr("sharedPool") })} aria-label={tr("newThreadInPool")} onClick={createInPool}><Icon name="Plus" className="db-icon"/></button></>}</div>
@@ -366,8 +400,9 @@ function DashboardPage() {
         </div>
 
       </main>
+      </ApplicationWorkspace>
     </div>
-    {settings && config && <Catalog config={config} projects={live.projects} apps={apps} appsReady={!!navigation} projectsStatus={live.status}
+    {settings && config && <Catalog internalSplit={internalSplit} onInternalSplit={changeSplitMode} config={config} projects={live.projects} apps={apps} appsReady={!!navigation} projectsStatus={live.status}
       initialFilter={settings === "projects" ? "project" : settings === "launcher" ? "app" : "all"} opener={settingsOpener}
       change={changeCatalog} onClose={() => setSettings(null)}
       onApp={id => { if (!navigation) throw new Error("Navigation unavailable"); navigation.actions.activate(id, { target: "current" }); }}/>}
@@ -376,7 +411,8 @@ function DashboardPage() {
 function DashboardViewport() {
   const frame = useRef<HTMLDivElement>(null);
   useMobileComposerViewport(frame);
-  return <div ref={frame} className="db-viewport"><DashboardPage/></div>;
+  const target = embeddedTarget();
+  return target ? <EmbeddedLaunch id={target}/> : <div ref={frame} className="db-viewport"><DashboardPage/></div>;
 }
 export default definePluginApp(app => {
   app.slots.experimental_sidebarNavigation({ id: "launcher", title: "BBDesk", placement: "rail", component: LauncherNavigation });

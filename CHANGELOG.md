@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.9
+
+- Open several applications alongside chat inside BBDesk. Enable the browser-local option in Catalog → More settings. BB's native split remains the default. BBDesk restores opened app columns, their order and widths when you return.
+- Resize app columns with the divider and drag their softly tinted headers to reorder them while keeping each application open.
+- Keep active or failed delegated work visible. After selected delegated work finishes successfully, return to its available managing conversation. Independent forks retain their own conversation status.
+
+See the [v0.1.9 release notes](docs/releases/v0.1.9.md).
+
 ## 0.1.8 — 2026-11-16
 
 - Sort projects and applications alphabetically by their displayed names in Catalog settings. Sorting follows the interface language and ignores letter case, including when searching.

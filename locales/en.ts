@@ -1,4 +1,10 @@
 export const en = {
+  extraSettings: "More settings",
+  internalSplitSetting: "Open applications in a BBDesk split",
+  internalSplitDescription: "Clear to use the BB split. This setting applies to this browser.",
+  openBbSplit: "Open in BB split",
+  moveAppPane: "Drag the title or press Alt + Left / Right to move this column",
+  appLoading: "Loading application…",
   completedAt: "Completed at {time}",
   workspaceSettings: "Configure projects and applications",
   catalogAppMembership: "In menu",

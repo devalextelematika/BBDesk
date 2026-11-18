@@ -59,16 +59,77 @@ test("catalog tabs and search preserve the native chat draft and selection", asy
   assert.equal(slot.getByTestId("bb-thread-chat"), chat);
 });
 
-test("catalog has only two tabs and searches original app names", async () => {
+test("catalog includes additional settings and searches original app names", async () => {
  const slot=mount({language:"en",launcher:[{id:item.id,label:"Personal shortcut"}]});
  const dialog=await showCatalog(slot);
- assert.deepEqual(within(dialog).getAllByRole("tab").map(tab=>tab.textContent),["Projects","Applications"]);
+ assert.deepEqual(within(dialog).getAllByRole("tab").map(tab=>tab.textContent),["Projects","Applications","More settings"]);
  assert.equal(dialog.querySelector("aside, [draggable], form"),null);
  fireEvent.click(within(dialog).getByRole("tab",{name:"Applications"}));
  fireEvent.change(within(dialog).getByRole("searchbox"),{target:{value:item.label}});
  assert.ok(within(dialog).getByRole("checkbox",{name:"Personal shortcut",checked:true}));
  assert.equal(within(dialog).getAllByRole("list").length,1);
  assert.equal(within(dialog).queryByRole("button",{name:"Open"}),null);
+});
+
+test("application split mode preserves the chat, reuses frames and restores host navigation", async () => {
+  const slot = mount({ language: "en", connected: true, threads: [thread("a", "p1", "Alpha")], launcher: [item] });
+  const chat = await slot.findByTestId("bb-thread-chat");
+  async function toggle() {
+    const dialog = await showCatalog(slot);
+    fireEvent.click(within(dialog).getByRole("tab", { name: "More settings" }));
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+  }
+  const open = slot.container.querySelector(".db-launch-split");
+  await toggle();
+  fireEvent.click(open);
+  const frame = slot.container.querySelector("iframe");
+  assert.equal(frame?.title, item.label);
+  const title = slot.container.querySelector(".db-app-heading strong");
+  const appColumn = frame.closest(".db-app-column");
+  const chatColumn = chat.closest(".db-app-column");
+  for (const key of ["ArrowLeft", "ArrowRight"]) {
+    fireEvent.keyDown(title, { key, altKey: true });
+    assert.equal(Number(appColumn.style.order) < Number(chatColumn.style.order), key === "ArrowLeft");
+    assert.equal(slot.container.querySelector("iframe"), frame);
+    assert.equal(slot.getByTestId("bb-thread-chat"), chat);
+  }
+  fireEvent.click(open);
+  assert.equal(slot.container.querySelector("iframe"), frame);
+  assert.equal(slot.container.querySelectorAll("iframe").length, 1);
+  assert.equal(slot.getByTestId("bb-thread-chat"), chat);
+  await toggle();
+  assert.equal(frame.isConnected, false);
+  fireEvent.click(open);
+  assert.equal(slot.navigation.inspection.sidebarNavigationCalls.at(-1).target, "split");
+  assert.equal(slot.getByTestId("bb-thread-chat"), chat);
+});
+
+test("internal application layout survives remount with its order and widths", async () => {
+  const options = { language: "en", launcher: [item] };
+  window.localStorage.setItem("bb-dashboard:internal-app-split", "true");
+  const first = mount(options);
+  fireEvent.click(await first.findByRole("button", { name: `Open ${item.label} alongside` }));
+  const workspace = first.container.querySelector(".db-app-workspace");
+  const [chat, appColumn] = workspace.querySelectorAll(".db-app-column");
+  for (const column of [chat, appColumn]) column.getBoundingClientRect = () => ({ width: 500 });
+  fireEvent.keyDown(appColumn.querySelector("strong"), { key: "ArrowLeft", altKey: true });
+  fireEvent.keyDown(workspace.querySelector('[role="separator"]'), { key: "ArrowRight", shiftKey: true });
+  assert.ok(Number(appColumn.style.flexGrow) > 1);
+  first.lifecycle.unmount();
+
+  const returned = mount(options);
+  await waitFor(() => assert.ok(returned.container.querySelector("iframe")));
+  const restored = returned.container.querySelector("iframe")?.closest(".db-app-column");
+  assert.ok(restored);
+  assert.equal(restored.style.order, appColumn.style.order);
+  assert.equal(restored.style.flexGrow, appColumn.style.flexGrow);
+  fireEvent.click(restored.querySelector(".db-app-heading button:last-child"));
+  returned.lifecycle.unmount();
+
+  const reopened = mount(options);
+  await reopened.findByRole("button", { name: `Open ${item.label} alongside` });
+  assert.equal(reopened.container.querySelector("iframe"), null);
 });
 
 test("catalog unavailable saved applications can be disconnected", async () => {

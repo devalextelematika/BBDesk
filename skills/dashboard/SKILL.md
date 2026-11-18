@@ -3,7 +3,7 @@ name: dashboard
 description: Use the BBDesk plugin's launcher and selected-project activity screen.
 ---
 
-Open BBDesk through BB navigation. Add applications through Catalog; the main button opens here, the split button opens alongside or in a new tab if BB cannot split. Project selection and launcher order belong to this plugin, not the BB sidebar. The stable plugin id remains `dashboard` and its page is `/plugins/dashboard/home`.
+Open BBDesk through BB navigation. Add applications through Catalog; the main button opens here, the split button uses BB's native split by default, with new-tab fallback. Enable the browser-local BBDesk split in Catalog → More settings to open multiple app columns alongside chat. Drag their tinted headers to reposition them and use the dividers to resize. Project selection and launcher order belong to this plugin, not the BB sidebar. The stable plugin id remains `dashboard` and its page is `/plugins/dashboard/home`.
 
 Thread split mode uses a single row of resizable native chats. Drag a bottom tab (including More) or a history entry onto the left/right half of a chat, or use Alt+Enter on a tab / Open alongside in history. Existing columns stay mounted. Clicking a column activates it; ordinary tab selection replaces that column or focuses an existing one. Header X removes a column without hiding/archiving/stopping its thread. History entries remain temporary bottom tabs while open. Dividers support pointer dragging, arrow keys (Shift for larger steps) and double-click equalization. Minimum column width is 320px; excess columns scroll horizontally. Layout, active column and widths persist in this browser's localStorage per project.
 

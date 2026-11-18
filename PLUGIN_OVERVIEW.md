@@ -9,7 +9,7 @@ Keep ongoing conversations, project activity and application shortcuts within re
 - Connect personal conversations outside projects through the Common threads option.
 - Browse recent project history, switch conversations with bottom tabs and hide tabs without a delayed placeholder.
 - Return to the last selected conversation in each project during the same browser-tab session.
-- Open application shortcuts in the workspace or alongside it using BB's native split action.
+- Open application shortcuts in the workspace, in BB's native split or in a resizable BBDesk column. Choose the split mode in Catalog → More settings and drag an app header to reposition its column.
 - Collapse and resize the application panel, with its layout remembered in your browser.
 - Use English by default or select Russian in BBDesk's native plugin settings.
 

@@ -5,7 +5,7 @@ import type { ConversationItem } from "./conversation-list";
 import type { ThreadTab } from "./thread-tabs";
 import type { SharedPool, SplitLayout } from "./split-layout";
 import type { ConversationChoice } from "./workspace-memory";
-import { hasWork, isWorking, isSubagent, isFinishedSubagent, sidebarActivity, type TrackedThread } from "./state";
+import { hasWork, hasThreadFailure, isWorking, isSubagent, isFinishedSubagent, sidebarActivity, subagentOwnerId, type TrackedThread } from "./state";
 import type { Completion } from "./thread-completion";
 
 type Live = ReturnType<typeof experimental_useSidebarThreads>;
@@ -13,14 +13,15 @@ export type Thread = Live["threads"][number] & { completion?: Completion };
 type PendingCreated = { id: string; projectId: string } | null;
 export const visibleThread = (t: Thread) => !t.isHidden && !t.isArchived;
 export const conversationThread = (t: Thread) => visibleThread(t) && !isSubagent(t);
-export const needsAttention = (t: Thread) => t.hasPendingInteraction || t.status === "error" || t.queuedWork === "failed" || (t.completion ? t.completion.pending && !t.completion.viewed : t.isUnread) && !isWorking(sidebarActivity(t));
+export const needsAttention = (t: Thread) => t.hasPendingInteraction || hasThreadFailure(t) || !isSubagent(t)
+  && (t.completion ? t.completion.pending && !t.completion.viewed : t.isUnread) && !isWorking(sidebarActivity(t));
 export const compareThreads = (a: Thread, b: Thread) => Number(needsAttention(b)) - Number(needsAttention(a)) || Number(isWorking(sidebarActivity(b))) - Number(isWorking(sidebarActivity(a))) || b.latestAttentionAt - a.latestAttentionAt || a.id.localeCompare(b.id);
 export function compareThreadCreation(a: { id: string; createdAt?: number | null }, b: { id: string; createdAt?: number | null }) {
   return (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id);
 }
 export function threadState(t: Thread): { message: MessageKey; tone: string } {
   if (t.hasPendingInteraction) return { message: "actionNeeded", tone: "attention" };
-  if (t.queuedWork === "failed" || t.status === "error") return { message: "error", tone: "error" };
+  if (hasThreadFailure(t)) return { message: "error", tone: "error" };
   if (t.runtimeStatus === "waiting-for-host") return { message: "waitingHost", tone: "waiting" };
   if (t.runtimeStatus === "provisioning") return { message: "provisioning", tone: "running" };
   if (t.status === "pending") return { message: "pending", tone: "waiting" };
@@ -28,8 +29,10 @@ export function threadState(t: Thread): { message: MessageKey; tone: string } {
   if (t.status === "stopping") return { message: "stopping", tone: "running" };
   if (isWorking(sidebarActivity(t))) return { message: isSubagent(t) ? "subagentWorking" : "working", tone: "running" };
   if (t.queuedWork === "waiting") return { message: "queued", tone: "waiting" };
-  if (t.completion?.pending) return { message: t.completion.viewed ? "completedAt" : "newReply", tone: t.completion.viewed ? "completed" : "result" };
-  if (t.isUnread && !t.completion?.at) return { message: "newReply", tone: "result" };
+  if (!isSubagent(t)) {
+    if (t.completion?.pending) return { message: t.completion.viewed ? "completedAt" : "newReply", tone: t.completion.viewed ? "completed" : "result" };
+    if (t.isUnread && !t.completion?.at) return { message: "newReply", tone: "result" };
+  }
   if (t.status !== "idle") return { message: "unknownState", tone: "unknown" };
   return { message: "read", tone: "read" };
 }
@@ -72,11 +75,14 @@ export function createWorkspaceModel({ threads, projects, config, tracked = [], 
       hiddenAttentionAt: row.visible ? prior?.hiddenAttentionAt : Math.max(prior?.hiddenAttentionAt ?? -Infinity, row.hiddenAttentionAt) });
   }
   const allThreads = threads.filter(t => {
+    if (!visibleThread(t) || !connectedById.has(t.projectId)) return false;
+    const activity = sidebarActivity(t);
+    if (isSubagent(t)) return !isFinishedSubagent(activity);
+
     const tracking = trackedById.get(t.id);
-    return visibleThread(t) && connectedById.has(t.projectId) && !isFinishedSubagent(sidebarActivity(t))
-    && (tracking?.visible || hasWork(sidebarActivity(t)) || drafts.has(t.id) || opened === t.id
+    return tracking?.visible || hasWork(activity) || drafts.has(t.id) || opened === t.id
       || t.latestAttentionAt > (configById.get(t.projectId)?.connectedAt ?? Infinity)
-        && !(tracking?.hiddenAttentionAt !== undefined && tracking.hiddenAttentionAt >= t.latestAttentionAt));
+        && !(tracking?.hiddenAttentionAt !== undefined && tracking.hiddenAttentionAt >= t.latestAttentionAt);
   });
   return { byId, visibleById, visibleByProject, threadsByProject, threadsByProjectId, conversationsByProject, projectsById: firstById(projects), connected, connectedById, trackedById,
     allThreads, workingIds: new Set(allThreads.map(t => t.id)), workingByProject: byProject(allThreads),
@@ -86,6 +92,19 @@ export function createWorkspaceModel({ threads, projects, config, tracked = [], 
     attentionCount: allThreads.filter(needsAttention).length };
 }
 export type WorkspaceModel = ReturnType<typeof createWorkspaceModel>;
+export function selectSubagentManager(model: WorkspaceModel, child: Thread) {
+  const visited = new Set([child.id]);
+  let ownerId = subagentOwnerId(child);
+  while (ownerId && !visited.has(ownerId)) {
+    visited.add(ownerId);
+    const owner = model.byId.get(ownerId);
+    if (!owner) return;
+    ownerId = subagentOwnerId(owner);
+    if (!isSubagent(owner)) return model.connectedById.has(owner.projectId)
+      ? model.conversationsByProject.get(owner.projectId)?.get(owner.id)
+      : undefined;
+  }
+}
 export function projectEntryThread(model: WorkspaceModel, projectId: string) {
   const threads = (model.workingByProject.get(projectId) ?? []).filter(t => !isSubagent(t)).sort(compareThreads);
   return threads.find(t => threadState(t).tone === "attention")
@@ -134,21 +153,22 @@ export function selectProjectWorkspace(model: WorkspaceModel, projectId: string,
   const openedSubagent = current && current.projectId === projectId && isSubagent(current) && !isFinishedSubagent(sidebarActivity(current)) ? current : null;
   const history = (model.threadsByProject.get(projectId) ?? []).filter(t => conversationThread(t) && !model.workingIds.has(t.id))
     .sort((a, b) => b.latestAttentionAt - a.latestAttentionAt || (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id)).slice(0, 10);
-  const historical = historyOpened ? model.visibleByProject.get(projectId)?.get(historyOpened) : undefined;
+  const historical = historyOpened ? conversations?.get(historyOpened) : undefined;
   return { paneThreads, rows, history, displayed: historyOpened ? historical : openedSubagent ?? rows.find(t => t.id === opened),
     hasSubagents: (model.workingByProject.get(projectId) ?? []).some(isSubagent),
     openingCreated: pendingCreated?.projectId === projectId && opened === pendingCreated.id && !current };
 }
 export function selectPoolWorkspace(model: WorkspaceModel, pool: SharedPool, pendingThreads: ReadonlyMap<string, string>, activeProjectId: string | undefined, tr: Translator) {
-  const rows = pool.entries.map(entry => {
+  const rows = pool.entries.flatMap(entry => {
     const thread = model.threadsByProjectId.get(entry.projectId)?.get(entry.threadId);
+    if (thread && isSubagent(thread)) return [];
     const pending = pendingThreads.get(entry.threadId) === entry.projectId;
-    return { id: entry.threadId, projectId: entry.projectId, projectConnected: model.connectedById.has(entry.projectId), thread, pending,
+    return [{ id: entry.threadId, projectId: entry.projectId, projectConnected: model.connectedById.has(entry.projectId), thread, pending,
       title: thread?.displayTitle ?? (pending ? tr("openingThread") : tr("unavailable")),
-      caption: namedProject(model, entry.projectId, tr), completionDetail: thread ? completionTooltip(thread, tr) : "", state: thread ? statusOf(thread, tr) : null };
+      caption: namedProject(model, entry.projectId, tr), completionDetail: thread ? completionTooltip(thread, tr) : "", state: thread ? statusOf(thread, tr) : null }];
   });
   return { rows, byId: firstById(rows),
-    states: rows.map(row => ({ id: row.id, title: row.title, text: row.state?.text ?? tr("projectUnavailable"), tone: row.state?.tone ?? "unknown", subagent: !!row.thread && isSubagent(row.thread), providerId: row.thread?.providerId })),
+    states: rows.map(row => ({ id: row.id, title: row.title, text: row.state?.text ?? tr("projectUnavailable"), tone: row.state?.tone ?? "unknown", subagent: false, providerId: row.thread?.providerId })),
     queued: rows.filter(row => row.thread?.queuedWork === "waiting").length,
     createProjectId: rows.find(row => row.id === (pool.active || rows[0]?.id))?.projectId ?? activeProjectId ?? model.connected[0]?.id ?? "",
     tabs: rows.map(row => ({ id: row.id, projectId: row.projectId, createdAt: row.thread?.createdAt, title: row.title, caption: row.caption,
