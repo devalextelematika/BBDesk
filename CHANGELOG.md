@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10
+
+- Hide BB's duplicated header and floating sidebar button in applications opened in the internal split.
+- Show the application's icon to the left of its title in the BBDesk column header.
+
+See the [v0.1.10 release notes](docs/releases/v0.1.10.md).
+
 ## 0.1.9
 
 - Open several applications alongside chat inside BBDesk. Enable the browser-local option in Catalog → More settings. BB's native split remains the default. BBDesk restores opened app columns, their order and widths when you return.

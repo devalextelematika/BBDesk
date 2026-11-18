@@ -4,6 +4,10 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
+## What's new in 0.1.10
+
+- **Application split:** Each BBDesk column shows the application's icon next to its title. The embedded BB header and sidebar button are hidden inside the column.
+
 ## What's new in 0.1.9
 
 - **Application split:** Enable **Open applications in a BBDesk split** under **Catalog → More settings**. Open applications alongside chat, resize them with the divider and drag their violet-tinted headers to rearrange them.
@@ -169,7 +173,7 @@ Existing RPC methods and whole-list replacement behavior remain available. See [
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-Version `0.1.9` is a patch update from `0.1.8`. See the [changelog](CHANGELOG.md) and [v0.1.9 release notes](docs/releases/v0.1.9.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.9`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
+Version `0.1.10` is a patch update from `0.1.9`. See the [changelog](CHANGELOG.md) and [v0.1.10 release notes](docs/releases/v0.1.10.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.10`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
 
 ## License
 

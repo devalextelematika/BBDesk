@@ -1,10 +1,12 @@
+import { experimental_SidebarNavigationIcon as NavigationIcon, type ExperimentalSidebarNavigationItem } from "@get-bb/plugin-sdk/app";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLauncherNavigation } from "../launcher-navigation";
 import { useTranslation } from "../use-translation";
 import { appWorkspaceId } from "../split-layout";
+import { Icon } from "./ui/icon";
 import { SmallButton } from "./workspace-button";
 
-export type AppPane = { id: string; label: string };
+type AppPane = { id: string; label: string; icon?: ExperimentalSidebarNavigationItem["icon"] };
 
 // Only a frame created by this workspace may use the BBDesk page as its launcher.
 export function embeddedTarget() {
@@ -32,7 +34,13 @@ function fitEmbeddedPanel(frame: HTMLIFrameElement) {
   if (!doc?.head || doc.getElementById("bbdesk-fit-panel")) return;
   const style = doc.createElement("style");
   style.id = "bbdesk-fit-panel";
-  style.textContent = `[id^="plugin-panel-main-pane-"] {
+  // The host header precedes the plugin body. Headers rendered by the plugin
+  // live inside that body and keep their own controls and layout.
+  style.textContent = `[id^="plugin-panel-main-pane-"] header:has(+ div > [data-testid="plugin-panel-body"]),
+    [data-testid="app-layout-root"]:has([id^="plugin-panel-main-pane-"]) > [data-testid="app-sidebar-trigger-overlay"] {
+      display:none !important;
+    }
+    [id^="plugin-panel-main-pane-"] {
       position:fixed !important; inset:0 !important; width:100vw !important; height:100dvh !important;
       z-index:30; background:var(--background);
     }`;
@@ -129,7 +137,9 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
             resize(index, measure(), (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 64 : 16));
           }}/>
         <section className="db-app-column" aria-label={pane.label} {...columnProps(pane.id)}>
-          <div className="db-app-heading"><strong draggable tabIndex={0} title={t("moveAppPane")}
+          <div className="db-app-heading"><span className="db-app-icon" aria-hidden="true">
+            {pane.icon ? <NavigationIcon icon={pane.icon} className="db-icon"/> : <Icon name="AppWindow" className="db-icon"/>}
+          </span><strong draggable tabIndex={0} title={t("moveAppPane")}
             onDragStart={event => {
               event.dataTransfer.setData("application/x-bbdesk-app-pane", pane.id);
               event.dataTransfer.effectAllowed = "move";

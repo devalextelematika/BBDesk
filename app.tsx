@@ -118,7 +118,8 @@ function DashboardPage() {
   const config = data?.config;
   const appPanes = appSplit.appIds.flatMap(id => {
     const entry = config?.launcher.find(app => app.id === id);
-    return entry ? [entry] : [];
+    const icon = navigation?.items.find(item => item.id === id)?.icon;
+    return entry ? [{ ...entry, icon }] : [];
   });
   const selectedThread = creating ? null : sharedPool.open ? sharedPool.active || sharedPool.entries[0]?.threadId || null : historyOpened ?? opened;
   const completionThreads = useThreadCompletion(live.threads, selectedThread, live.status === "ready");
