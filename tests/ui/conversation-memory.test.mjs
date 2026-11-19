@@ -18,6 +18,24 @@ test("thread heading renders Russian status with environment only in the tooltip
   assert.ok(slot.getByRole("button", { name: "Убрать «Проверка русского треда» с рабочего стола" }));
 });
 
+test("project heading shows the open thread's composer selection only", async () => {
+  const slot = mount({
+    connected: true,
+    threads: [thread("t1", "p1", "Текущий тред", { providerId: "codex" })],
+    providers: { status: "ready", providers: [{ id: "codex", displayName: "Codex" }] },
+    composer: {
+      scope: { kind: "thread", threadId: "t1" },
+      selection: { model: "gpt-6.2-sol", reasoningLevel: "high" },
+    },
+  });
+  await slot.findByTestId("bb-thread-chat");
+  const summary = () => slot.container.querySelector(".db-thread-open .db-thread-model");
+  assert.equal(summary().textContent, "Codex · gpt-6.2-sol · high");
+  assert.equal(summary().title, summary().textContent);
+  await slot.behavior.setComposerScope({ kind: "thread", threadId: "another-thread" });
+  assert.equal(summary().textContent, "Codex");
+});
+
 test("previous threads use BB update order, show compact titles and keep the selected chat when the panel closes", async () => {
   const previous = Array.from({ length: 12 }, (_, i) => thread(`old${i}`, "p1", `Прошлый ${i}`, { latestAttentionAt: 200 + i, updatedAt: 400 - i }));
   const slot = mount({ connected: true, threads: [thread("active", "p1", "Текущий"), ...previous], hiddenIds: previous.map(t => t.id) });
@@ -348,7 +366,11 @@ test("tabs expose live project status and support arrows, Home and End", async (
   fireEvent.keyDown(second, { key: "Home" });
   assert.equal(first.getAttribute("aria-selected"), "true");
   fireEvent.keyDown(first, { key: "End" });
-  assert.equal(second.getAttribute("aria-selected"), "true");
+  const pool = slot.getByRole("button", { name: /^Общий пул/ });
+  assert.equal(pool.getAttribute("aria-pressed"), "true");
+  assert.equal(document.activeElement, pool);
+  fireEvent.keyDown(pool, { key: "Home" });
+  assert.equal(first.getAttribute("aria-selected"), "true");
 });
 
 test("project conversation memory survives navigation and remounts and falls back when a conversation disappears", async () => {

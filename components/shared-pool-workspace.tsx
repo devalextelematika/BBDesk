@@ -36,7 +36,7 @@ export function SharedPoolWorkspace({ model, actions, drop, tr }: {
             <div className="db-thread-line" data-tone={row.state?.tone ?? "unknown"}><button type="button" className="db-thread-open" title={row.heading} aria-expanded="true" aria-controls={`chat-${id}`} onClick={() => actions.activate(id)}>
               <ThreadIndicator tone={row.state?.tone ?? "unknown"}/><span className="db-thread-text"><span className="db-thread-project">{row.caption}</span><span className="db-thread-title">{row.title}{row.draft && tr("draftSuffix")}</span></span>{row.state && <span className={`db-state ${row.state.tone}`}>{row.state.text}</span>}
             </button><SmallButton label={tr("removeFromPool", { name: row.title })} icon="X" onClick={() => actions.remove(id)}/></div>
-            {row.available ? <div className="db-chat" id={`chat-${id}`}><ExpandedChat threadId={id} fillSpace/></div> : <div className="db-project-empty">{tr("projectAccessHelp")}</div>}
+            {row.available ? <div className="db-chat" id={`chat-${id}`}><ExpandedChat threadId={id}/></div> : <div className="db-project-empty">{tr("projectAccessHelp")}</div>}
           </div>;
         }}/> : <div className="db-project-empty">{tr("sharedPoolEmpty")}</div>)}
     </div>

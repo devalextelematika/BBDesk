@@ -39,9 +39,14 @@ npm ci --omit=dev --omit=optional --ignore-scripts
 npm run build
 ```
 
-This checks the dependency omission policy used by BB Git installs; BB itself installs dependencies and builds through its own toolchain without package lifecycle scripts. A development build or a production install over an existing development tree does not establish this check. Zod is the only production dependency. The SDK, React and harness/tooling dependencies belong to development; do not promote test peers into production to make this check pass.
+This checks the dependency omission policy used by BB Git installs; BB itself installs dependencies and builds through its own toolchain without package lifecycle scripts. A development build or a production install over an existing development tree does not establish this check. Zod and `@get-bb/plugin-sdk` are the production dependencies. The SDK is there because `contracts.ts` imports `defineRpcContract` from the SDK root and the server build bundles it from the plugin's own install, while Git installs omit devDependencies; `bb plugin types --check` enforces this. React and harness/tooling dependencies belong to development; do not promote test peers into production to make this check pass.
 
-Record Node, npm, BB CLI and SDK versions independently. Type checking and harness tests use the pinned SDK declarations (`0.6.94`); the BB CLI builds with its own SDK and warns if the pin differs. A build with one CLI/SDK pair does not establish compatibility with every version allowed by `engines`. SDK repinning and version-range changes require their own review.
+Record Node, npm, BB CLI and SDK versions independently. Two SDK versions matter:
+
+- The exact `@get-bb/plugin-sdk` pin selects the build-time declarations and the bundled server helper. `bb plugin types` repins it to the running BB; it does not restrict which BB can install the plugin.
+- `engines.bbPluginSdk` (`>=0.6.94 <0.7.0`) is what BB enforces for other users: managed installs refuse a host SDK outside the range and path installs load as incompatible. Keep its floor at the oldest SDK that is verified, not at the current pin, so a newer pin never blocks users on older BB.
+
+`npm run test:sdk-floor` installs the floor SDK from `engines.bbPluginSdk` without saving, runs the typecheck and the full suite against it, and then restores the pinned SDK from the lockfile. Run it, together with `npm test` on the current pin, after every SDK repin and before raising the floor. Raise the floor only when the plugin starts using an API that the old SDK lacks, and record that in the changelog. A build with one CLI/SDK pair does not establish compatibility with every version allowed by `engines`; harness tests cover source compatibility, not a real older BB host.
 
 Inspect the resulting source and `dist` file manifests, artifact metadata and bundle content. Source and distribution must contain no runtime data, credentials, archives or machine-local verification materials. Keep detailed logs outside the repository or under ignored `docs/local/`.
 
@@ -51,7 +56,7 @@ The build scripts are `prebuild` (UTF-8/localization source check), `build` (`bb
 
 The supported source paths are the local-directory and Git installations shown in the README. Both build the plugin; local installation uses the chosen source directory and is a separate host-changing action. This verification does not install or reload anything.
 
-The parent workspace's archive instructions refer to `npm run share:zip`. This checkout has no `share:zip` script or ZIP/upload implementation. Historical archive reports do not establish a current delivery command. An archive request therefore requires restoring and reviewing that workflow before it can be fulfilled under the workspace instructions. Do not invent a download URL or report a delivery that did not occur. Any restored workflow must build the reviewed source, inspect the archive contents, use the current BB project/server context and verify the downloaded attachment bytes. A localhost link works on the BB computer; the ZIP itself can be sent to others.
+This repository contains no ZIP or upload command: packaging for a particular BB project depends on that project's context, so it lives outside the plugin. The maintainer's workspace keeps it as `tools/share-zip.ps1` next to this checkout, with the delivery rules in that workspace's `AGENTS.md`. It builds the plugin, packages git-tracked and non-ignored files without tests, documentation and CI, adds `dist` and an installation README, uploads the archive as a project attachment, and verifies the bytes through the BB CLI and the printed HTTP link. Do not invent a download URL or report a delivery that did not occur. A localhost link works on the BB computer; the ZIP itself can be sent to others.
 
 `prepack` alone is not an audited npm distribution configuration. npm publication is not the delivery path verified here. Before selecting it, review the actual `npm pack` file list and ensure the required bundles, metadata, assets and skills are included while local materials are excluded. No npm package or ZIP is published as part of source verification.
 
@@ -63,7 +68,7 @@ The SDK DOM harness verifies component behavior and mounted node identity, not B
 
 ## Release identity and authorization
 
-The package and lockfile identify **0.1.10**, a patch update from **0.1.9**. Release notes are in [releases/v0.1.10.md](releases/v0.1.10.md). Before publishing, recheck remote state and confirm that the intended tag is unused. Do not recreate or move an existing tag.
+The package and lockfile identify **0.1.11**, a patch update from **0.1.10**. Release notes are in [releases/v0.1.11.md](releases/v0.1.11.md). Before publishing, recheck remote state and confirm that the intended tag is unused. Do not recreate or move an existing tag.
 
 Publication requires an explicit owner instruction. Source verification alone does not authorize commits, pushes, tags, GitHub Releases, archive uploads or npm publication. At the authorized publication step, review the final source, commit it and use a new, unused version tag on that tested commit.
 

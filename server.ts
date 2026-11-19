@@ -66,7 +66,7 @@ export default async function plugin(bb: BbPluginApi) {
         sync.requestThreads([row.id]); fresh = false; continue;
       }
       const previous = tracked.get(row.id);
-      const next = reconcileThread(previous, activity(row), project.connectedAt);
+      const next = reconcileThread(previous, activity(row), project.connectedAt, config.backgroundThreads);
       if (next && JSON.stringify(previous) !== JSON.stringify(next)) {
         await bb.storage.kv.set("thread:" + row.id, next);
         // A write already started cannot be cancelled. Mirror its confirmed
@@ -134,6 +134,7 @@ export default async function plugin(bb: BbPluginApi) {
         if (ids.some(id => !known.has(id))) throw new Error("DASHBOARD_PROJECT_UNAVAILABLE");
       }
       const next = await saveConfig(changeConfiguration(config, mutation, Date.now()));
+      if (mutation.method === "catalog_change" && mutation.change.type === "background") sync.requestFull(true);
       sync.requestProjects(mutation.method === "projects_set" ? next.projects.filter(project => project.enabled).map(project => project.id) : ids ?? []);
       return next;
     });
@@ -168,9 +169,9 @@ export default async function plugin(bb: BbPluginApi) {
   }
   bb.rpc.register(rpcContract, {
     snapshot: () => serial(async () => {
-      // Read confirmed state without awaiting SDK history. Initial snapshots may
-      // have syncedAt:null; the completed pass publishes another signal.
-      if (syncedAt === null || syncError !== null || Date.now() - syncedAt >= 60_000) sync.requestFull();
+      // Read confirmed state without awaiting SDK history. The activity service runs
+      // full passes at start, on reconnect and every minute, and retries failures
+      // after a backoff; a completed pass publishes another signal.
       return structuredClone({ config, tracked: [...tracked.values()].filter(t => config.projects.some(p => p.id === t.projectId && p.enabled)), syncError, syncedAt });
     }),
     projects_set: input => mutateConfig({ method: "projects_set", ...input }),
@@ -186,26 +187,23 @@ export default async function plugin(bb: BbPluginApi) {
       const stop = () => sync.stop();
       signal.addEventListener("abort", stop, { once: true });
       const subscriptions: (() => void)[] = [];
-      let lastFull = Date.now();
       try {
         subscriptions.push(bb.sdk.subscribe({ event: "thread:changed", callback: event => {
           if (signal.aborted || disposed) return;
-          if (event.changes.some(change => ["thread-created", "status-changed", "queue-changed", "interactions-changed", "events-appended", "archived-changed", "thread-deleted"].includes(change))) {
+          if (event.changes.some(change => ["thread-created", "title-changed", "status-changed", "queue-changed", "interactions-changed", "events-appended", "archived-changed", "thread-deleted"].includes(change))) {
             if (event.id) sync.requestThreads([event.id]); else sync.requestFull(true);
           }
         } }));
         subscriptions.push(bb.sdk.subscribe({ event: "realtime:connection", callback: event => { if (!signal.aborted && !disposed && event.state === "connected") sync.requestFull(true); } }));
         sync.requestFull();
-        while (!signal.aborted) {
-          await new Promise<void>(resolve => {
-            const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
-            const timer = setTimeout(done, 750);
-            signal.addEventListener("abort", done, { once: true });
-            if (signal.aborted) done();
-          });
-          if (signal.aborted) break;
-          if (Date.now() - lastFull >= 60_000) { lastFull = Date.now(); sync.requestFull(); }
-        }
+        // Refresh fully once a minute, even without realtime events, until the service stops.
+        await new Promise<void>(resolve => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const arm = () => { timer = setTimeout(() => { sync.requestFull(); arm(); }, 60_000); };
+          const done = () => { clearTimeout(timer); resolve(); };
+          signal.addEventListener("abort", done, { once: true });
+          if (signal.aborted) done(); else arm();
+        });
       } finally { signal.removeEventListener("abort", stop); subscriptions.reverse().forEach(unsubscribe => unsubscribe()); sync.stop(); }
     },
   });

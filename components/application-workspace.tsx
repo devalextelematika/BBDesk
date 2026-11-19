@@ -4,6 +4,8 @@ import { useLauncherNavigation } from "../launcher-navigation";
 import { useTranslation } from "../use-translation";
 import { appWorkspaceId } from "../split-layout";
 import { Icon } from "./ui/icon";
+import { SplitDivider } from "./split-divider";
+import { dropAfter } from "../dom-utils";
 import { SmallButton } from "./workspace-button";
 
 type AppPane = { id: string; label: string; icon?: ExperimentalSidebarNavigationItem["icon"] };
@@ -54,7 +56,6 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
 }) {
   const { t } = useTranslation();
   const strip = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ pointer: number; x: number; index: number; widths: number[] } | null>(null);
   // CSS order keeps each iframe in its original DOM node and browsing context.
   const [moving, setMoving] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
@@ -81,9 +82,7 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
         if (moving === null) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
-        const rect = event.currentTarget.getBoundingClientRect();
-        const after = event.clientX >= rect.left + rect.width / 2;
-        setDrop(moving === id ? null : { id, after });
+        setDrop(moving === id ? null : { id, after: dropAfter(event) });
       },
       onDragLeave(event: React.DragEvent<HTMLElement>) {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrop(null);
@@ -91,8 +90,7 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
       onDrop(event: React.DragEvent<HTMLElement>) {
         if (moving === null) return;
         event.preventDefault(); event.stopPropagation();
-        const rect = event.currentTarget.getBoundingClientRect();
-        place(moving, id, event.clientX >= rect.left + rect.width / 2);
+        place(moving, id, dropAfter(event));
         finishMove();
       },
     };
@@ -117,24 +115,13 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
       const index = i + 1;
       const leftWeight = weight(ids[i]!);
       return <Fragment key={pane.id}>
-        <div className="db-split-divider" role="separator" aria-orientation="vertical" tabIndex={0}
-          aria-label={t("resizeSplit")} aria-valuemin={0} aria-valuemax={100}
-          style={{ order: index * 2 - 1 }}
-          aria-valuenow={Math.round(100 * leftWeight / (leftWeight + weight(ids[index]!)))}
-          onPointerDown={event => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            drag.current = { pointer: event.pointerId, x: event.clientX, index, widths: measure() };
-            strip.current!.dataset.resizing = "true";
-          }}
-          onPointerMove={event => { const start = drag.current; if (start?.pointer === event.pointerId) resize(start.index, start.widths, event.clientX - start.x); }}
-          onLostPointerCapture={() => { drag.current = null; if (strip.current) delete strip.current.dataset.resizing; }}
-          onDoubleClick={() => { const widths = measure(); resize(index, widths, (widths[index]! - widths[i]!) / 2); }}
-          onKeyDown={event => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-            event.preventDefault();
-            resize(index, measure(), (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 64 : 16));
+        <SplitDivider style={{ order: index * 2 - 1 }}
+          valueNow={Math.round(100 * leftWeight / (leftWeight + weight(ids[index]!)))}
+          measure={measure} resize={(delta, widths) => resize(index, widths, delta)}
+          reset={() => { const widths = measure(); resize(index, widths, (widths[index]! - widths[i]!) / 2); }}
+          onDragging={dragging => {
+            if (!strip.current) return;
+            if (dragging) strip.current.dataset.resizing = "true"; else delete strip.current.dataset.resizing;
           }}/>
         <section className="db-app-column" aria-label={pane.label} {...columnProps(pane.id)}>
           <div className="db-app-heading"><span className="db-app-icon" aria-hidden="true">

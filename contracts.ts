@@ -7,8 +7,9 @@ export const configSchema = z.object({
   projects: z.array(projectSchema).refine(projects => projects.filter(project => project.enabled).length <= 100, "At most 100 projects can be enabled"),
   launcher: z.array(z.object({ id, label: z.string().min(1).max(200) })).max(100),
   sharedPool: z.boolean().default(true),
+  backgroundThreads: z.object({ enabled: z.boolean(), substrings: z.array(z.string().trim().min(1).max(200)).max(100), since: z.number().nonnegative() }).optional(),
 });
-export const trackedSchema = z.object({ id, projectId: id, visible: z.boolean(), latestAttentionAt: z.number(), hiddenAttentionAt: z.number() });
+export const trackedSchema = z.object({ id, projectId: id, visible: z.boolean(), latestAttentionAt: z.number(), hiddenAttentionAt: z.number(), backgroundMatched: z.boolean().optional(), backgroundExposed: z.boolean().optional() });
 export type DashboardConfig = z.infer<typeof configSchema>;
 export type DashboardSnapshot = { config: DashboardConfig; tracked: z.infer<typeof trackedSchema>[]; syncError: string | null; syncedAt: number | null };
 
@@ -20,6 +21,7 @@ export const catalogChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("restore"), kind, id, label: z.string().trim().min(1).max(200).optional(), previousId: id.optional(), nextId: id.optional() }),
   z.object({ type: z.literal("rename"), id, label: z.string().trim().min(1).max(200) }),
   z.object({ type: z.literal("pool"), enabled: z.boolean() }),
+  z.object({ type: z.literal("background"), enabled: z.boolean(), substrings: z.array(z.string().trim().min(1).max(200)).max(100) }),
 ]);
 export type CatalogChange = z.infer<typeof catalogChangeSchema>;
 export type CatalogKind = z.infer<typeof kind>;

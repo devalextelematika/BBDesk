@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.11 — 2026-11-19
+
+- Add optional background-thread rules in Catalog → More settings. Match new threads by case-insensitive title substrings, keep their activity in indicators, and show project tabs when an error or input request needs attention. Successfully completed matches disappear automatically; original BB threads remain available.
+- Keep project navigation on one measured row, with excess projects, Common threads and Shared pool in a More menu. Support keyboard navigation, thread creation and project reordering through the menu.
+- Show the provider in project chat headers, along with the selected model and reasoning level when available from that chat's composer.
+- Build against Plugin SDK 0.6.157. BBDesk still installs on BB with Plugin SDK 0.6.94 or newer (`engines.bbPluginSdk` is unchanged); `npm run test:sdk-floor` verifies that floor.
+- The SDK is now a production dependency, as BB requires for Git installs: the server bundles the SDK's RPC contract helper.
+- Remove unused code, styles, icons and translation strings.
+- Internal: page synchronization runs as one ordered, tested pass instead of seven separate effects; shared helpers replace duplicated drag, resize, focus and storage code. No behavior change is intended.
+- Internal: the server refreshes activity with one one-minute timer instead of a 750 ms polling loop plus refreshes triggered by snapshot reads; creation and pool requests use numeric ids instead of object tokens; tracking rows are indexed once, without merging duplicates the server cannot produce.
+- Refusing to hide a working thread now shows a localized message instead of a generic error.
+- Tooling: the source check discovers every file instead of a hand-kept list, CI also tests against the oldest supported Plugin SDK, and third-party notices cover the bundled Zod and Plugin SDK code.
+
+See the [v0.1.11 release notes](docs/releases/v0.1.11.md).
+
 ## 0.1.10
 
 - Hide BB's duplicated header and floating sidebar button in applications opened in the internal split.

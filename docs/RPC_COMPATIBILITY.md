@@ -6,7 +6,7 @@ BBDesk keeps the six existing RPC methods. The contract lives in `contracts.ts`;
 
 | Method | Current package UI | Compatibility and behavior |
 | --- | --- | --- |
-| `snapshot` | Page refresh and realtime refresh | Returns last confirmed config/tracked, syncError and syncedAt. Reading it schedules background refresh when needed. |
+| `snapshot` | Page refresh and realtime refresh | Returns last confirmed config/tracked, syncError and syncedAt. Reading it does not start synchronization: the activity service runs full passes at start, on reconnect and every minute, and retries failures after a backoff. |
 | `projects_set` | No current UI caller | Replaces the enabled project list atomically. Input order is retained after deduplication. Other known projects remain disabled with their connection history. |
 | `launcher_set` | No current UI caller | Replaces the whole application list atomically. Duplicate IDs retain first occurrence order and the last label. |
 | `catalog_change` | Catalog membership/pool controls and project/application reordering | Changes one entry or the Shared Pool flag against the latest confirmed configuration. |
@@ -39,4 +39,6 @@ Restore inserts before an available nextId, otherwise after an available previou
 - Up to 100 current thread undo tokens are kept in memory. Hiding again replaces that thread's token; successful restore consumes it. Eviction or plugin reload invalidates a token. Failed writes do not consume the token.
 - Thread mutations and background reconciliation retain their distinct revision/cancellation rules. A confirmed manual hide/restore increments the thread revision; an activity observation does not masquerade as a new user action.
 
-RPC input/output schemas and storage versions are unchanged. Removing methods or changing these forms requires a separate compatibility decision. Source tests and a build do not replace installed-host acceptance.
+Background-thread visibility adds an optional `backgroundThreads` configuration (`enabled`, `substrings`, server-owned `since`) and the additive `catalog_change` form `{ type: "background", enabled, substrings }`. The activation timestamp is set on enabling; ordinary edits retain it. Up to 100 nonempty substrings of 200 characters are accepted. Old configurations remain valid. Optional `backgroundMatched` and `backgroundExposed` tracking fields preserve matching across title changes and attention through retries. A full activity refresh follows rule changes; title changes also trigger synchronization.
+
+Existing RPC forms and storage keys remain compatible. Source tests and a build do not replace installed-host acceptance.

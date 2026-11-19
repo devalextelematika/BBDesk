@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 const { changeCatalog: applyCatalogChange } = await import('../../catalog-config.ts');
 
-export function mount({ connected = false, launcher = [], threads = [], hiddenIds = [], draftThreadIds = [], projects = [project], sdk = {}, navigationItems = [item], withNavigation = true, language = "ru", rpcOverrides = {}, threadStatus = "ready", providers = undefined } = {}) {
+export function mount({ connected = false, launcher = [], threads = [], hiddenIds = [], draftThreadIds = [], projects = [project], sdk = {}, navigationItems = [item], withNavigation = true, language = "ru", rpcOverrides = {}, threadStatus = "ready", providers = undefined, composer = undefined } = {}) {
   // Existing regression scenarios explicitly exercise Russian. null omits the preference.
   const languageSettings = language === null ? {} : { language };
   let snapshot = { config: { projects: connected ? projects.map(p => ({ id: p.id, enabled: true, connectedAt: 100 })) : [], launcher }, tracked: threads.map(t => ({ id: t.id, projectId: t.projectId, visible: !hiddenIds.includes(t.id), latestAttentionAt: t.latestAttentionAt, hiddenAttentionAt: hiddenIds.includes(t.id) ? t.latestAttentionAt : 0 })), syncError: null, syncedAt: 150 };
@@ -18,6 +18,7 @@ export function mount({ connected = false, launcher = [], threads = [], hiddenId
     settings: languageSettings,
     sidebarThreads: { status: threadStatus, projects, threads },
     providers,
+    composer,
     sidebarDraftThreadIds: draftThreadIds,
     // Pages have no sidebar navigation context in BB. Only the bridge above does.
     sdk: { subscribe: () => () => {}, ...sdk },

@@ -1,5 +1,4 @@
 import type { CatalogChange, DashboardConfig } from "./contracts";
-export { catalogChangeSchema } from "./contracts";
 export type { CatalogChange, CatalogKind } from "./contracts";
 
 // Both full replacement and catalog ordering preserve disabled project history.
@@ -25,6 +24,10 @@ function restorePosition(ids: readonly string[], change: Extract<CatalogChange, 
 
 // Transform only the requested entry against the server's latest configuration.
 export function changeCatalog(config: DashboardConfig, change: CatalogChange, now: number): DashboardConfig {
+  if (change.type === "background") return { ...config, backgroundThreads: {
+    enabled: change.enabled, substrings: [...new Map(change.substrings.map(value => [value.toLowerCase(), value])).values()],
+    since: change.enabled && !config.backgroundThreads?.enabled ? now : config.backgroundThreads?.since ?? now,
+  } };
   if (change.type === "pool") return { ...config, sharedPool: change.enabled };
   if (change.type === "rename") return renameApplication(config, change.id, change.label);
   const entries = change.kind === "project" ? config.projects.filter(entry => entry.enabled) : config.launcher;

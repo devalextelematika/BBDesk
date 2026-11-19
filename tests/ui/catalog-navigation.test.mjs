@@ -77,7 +77,7 @@ test("application split mode preserves the chat, reuses frames and restores host
   async function toggle() {
     const dialog = await showCatalog(slot);
     fireEvent.click(within(dialog).getByRole("tab", { name: "More settings" }));
-    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Open applications in a BBDesk split" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
   }
   const open = slot.container.querySelector(".db-launch-split");
@@ -241,7 +241,7 @@ test("common threads remain a special catalog control and keep their distinct ta
   await showCatalog(slot);
   assert.equal(slot.queryByRole('listitem',{name:'Personal'}),null);
   await act(async()=>fireEvent.click(slot.getByRole('checkbox',{name:'Common threads'})));
-  assert.ok(slot.getByRole('tab',{name:/^Common threads,/}).closest('.db-project-tools'));
+  assert.ok(slot.getByRole('tab',{name:/^Common threads,/}).closest('.db-project-tab-strip'));
   await act(async()=>fireEvent.click(slot.getByRole('checkbox',{name:project.name})));
   assert.equal(slot.getByRole('tab',{name:new RegExp('^'+project.name+',')}).closest('.db-project-tools'),null);
   assert.equal(slot.queryByRole('tab',{name:/^Personal,/}),null);

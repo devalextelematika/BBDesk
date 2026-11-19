@@ -1,7 +1,7 @@
 import type { ConversationChoice } from "./workspace-memory";
 import { addPoolEntry, removePoolEntry, movePoolEntry, selectSplitThread, type PoolEntry, type SharedPool, type SplitLayouts, type SplitLayout } from "./split-layout";
-import { conversationThread, selectProjectConversation, compareThreadCreation, type WorkspaceModel } from "./workspace-selectors";
-import { isSubagent } from "./state";
+import { conversationThread, selectProjectConversation, compareThreadCreation, selectActiveProject, selectSubagentManager, projectEntryThread, type WorkspaceModel } from "./workspace-selectors";
+import { isFinishedSubagent, isSubagent, sidebarActivity } from "./state";
 import type { MessageKey } from "./i18n";
 import type { readWorkspaceMemory } from "./workspace-memory";
 
@@ -16,7 +16,8 @@ export interface WorkspaceState {
   projectId: string | null;
   enteredProjectId: string | null;
   pendingCreated: CreatedThread | null;
-  creation: { intent: object; projectId: string } | null;
+  /** The open composer. Its id tells late spawn results whether that composer is still current. */
+  creation: { id: number; projectId: string } | null;
   layouts: SplitLayouts;
   pool: SharedPool;
   memory: ReturnType<typeof readWorkspaceMemory>;
@@ -24,11 +25,14 @@ export interface WorkspaceState {
   poolLimitNotice: boolean;
   unplaced: (PoolEntry & { title: string; reason: "limit" | "invalid" | "removed" })[];
   pendingPool: ReadonlyMap<string, string>;
-  poolRequests: ReadonlyMap<object, ReadonlySet<string>>;
+  /** In-flight pool spawns by request id, with the threads explicitly unpinned meanwhile. */
+  poolRequests: ReadonlyMap<number, ReadonlySet<string>>;
+  /** Last id issued to a composer or pool request; ids are never reused. */
+  seq: number;
 }
 export function createWorkspaceState(memory: WorkspaceState["memory"], layouts: SplitLayouts, pool: SharedPool): WorkspaceState {
   return { memory, layouts, pool, projectId: memory.projectId, enteredProjectId: null, selection: { kind: "none" }, pendingCreated: null, creation: null,
-    notice: "", poolLimitNotice: false, unplaced: [], pendingPool: new Map(), poolRequests: new Map() };
+    notice: "", poolLimitNotice: false, unplaced: [], pendingPool: new Map(), poolRequests: new Map(), seq: 0 };
 }
 export type WorkspaceEvent =
   | { type: "project.select"; projectId: string; workspace: WorkspaceModel }
@@ -38,11 +42,11 @@ export type WorkspaceEvent =
   | { type: "conversation.toggle"; id: string }
   | { type: "selection.recover"; id: string | null; projectId?: string; history?: boolean; expectedSelection?: WorkspaceSelection }
   | { type: "created.open"; entry: CreatedThread }
-  | { type: "create.start"; projectId: string; intent: object }
+  | { type: "create.start"; projectId: string }
   | { type: "create.close" }
   | { type: "pool.show" }
-  | { type: "spawn.project"; entry: CreatedThread; intent: object | null }
-  | { type: "spawn.pool"; entry: CreatedThread; intent: object | null; operation: object; title: string }
+  | { type: "spawn.project"; entry: CreatedThread; creationId: number | null }
+  | { type: "spawn.pool"; entry: CreatedThread; creationId: number | null; requestId: number; title: string }
   | { type: "pending.seen"; entry: CreatedThread }
   | { type: "pane.add"; projectId: string; id: string; history: boolean; target?: string; after: boolean }
   | { type: "pane.remove"; projectId: string; id: string; workspace: WorkspaceModel }
@@ -54,11 +58,20 @@ export type WorkspaceEvent =
   | { type: "pool.remove" | "pool.activate"; id: string }
   | { type: "pool.move"; id: string; targetId: string; after: boolean }
   | { type: "pool.resize"; sizes: Record<string, number> }
-  | { type: "pool.request" | "pool.failed"; operation: object }
+  | { type: "pool.request" }
+  | { type: "pool.failed"; requestId: number }
   | { type: "pool.limit" }
   | { type: "thread.hidden"; entry: CreatedThread; workspace: WorkspaceModel }
   | { type: "memory.remember"; projectId: string; choice?: ConversationChoice; expectedSelection: WorkspaceSelection }
-  | { type: "notice"; value: MessageKey | "" };
+  | { type: "notice"; value: MessageKey | "" }
+  | ({ type: "workspace.sync" } & WorkspaceSync);
+
+/** Inputs of one synchronization pass. `selection` and `projectId` are the state the
+ * workspace model was rendered with: `workspace.current` and `workingIds` depend on them. */
+export type WorkspaceSync = {
+  workspace: WorkspaceModel; liveReady: boolean; dataReady: boolean; poolEnabled: boolean;
+  selection: WorkspaceSelection; projectId: string | null;
+};
 
 export function selectionFields(selection: WorkspaceSelection): { opened: string | null; historyOpened: string | null; creating: string | null } {
   if (selection.kind === "project-composer") return { opened: null, historyOpened: null, creating: selection.projectId };
@@ -91,8 +104,61 @@ function openConversation(state: WorkspaceState, event: { projectId: string; id:
     pool: poolOpen(state.pool, false),
     layouts: selectPane(state.layouts, event.projectId, event.id), notice: event.history ? state.notice : "" };
 }
+/** Where a selection that no longer shows a live conversation should go, if anywhere. */
+function recoverySelection(state: WorkspaceState, workspace: WorkspaceModel): WorkspaceEvent | null {
+  const { opened, historyOpened } = selectionFields(state.selection);
+  const active = selectActiveProject(workspace, state.projectId);
+  const entry = () => active ? projectEntryThread(workspace, active.id)?.id ?? null : null;
+  const current = workspace.current;
+  if (opened && (!current || isFinishedSubagent(sidebarActivity(current)))) {
+    // Spawn can resolve before the sidebar's live view includes the new thread.
+    if (state.pendingCreated?.id === opened && !current) return null;
+    const manager = current && selectSubagentManager(workspace, current);
+    return manager
+      ? { type: "selection.recover", projectId: manager.projectId, id: manager.id, history: !workspace.workingIds.has(manager.id), expectedSelection: state.selection }
+      : { type: "selection.recover", id: entry(), expectedSelection: state.selection };
+  }
+  if (historyOpened && !(active && workspace.conversationsByProject.get(active.id)?.has(historyOpened)))
+    return { type: "selection.recover", id: entry(), expectedSelection: state.selection };
+  return null;
+}
+
+/**
+ * Brings the workspace state in line with live threads and configuration in one ordered pass.
+ * Steps that read selection-dependent model fields run only while the state still has the
+ * selection and project the model was built for. Once a step changes either, the rest wait
+ * for the next render, which rebuilds the model and synchronizes again. A pass that changes
+ * nothing returns the same state object, so repeated passes settle.
+ */
+function syncWorkspace(state: WorkspaceState, sync: WorkspaceSync): WorkspaceState {
+  const { workspace, liveReady, dataReady, poolEnabled } = sync;
+  const fresh = (s: WorkspaceState) => s.selection === sync.selection && s.projectId === sync.projectId;
+  let s = state;
+  const pending = s.pendingCreated;
+  if (pending && (fresh(s) && workspace.current?.id === pending.id || workspace.conversationsByProject.get(pending.projectId)?.has(pending.id)))
+    s = workspaceTransition(s, { type: "pending.seen", entry: pending });
+  if (liveReady && fresh(s)) {
+    const recovery = recoverySelection(s, workspace);
+    if (recovery) s = workspaceTransition(s, recovery);
+  }
+  if (liveReady && dataReady) {
+    s = workspaceTransition(s, { type: "layouts.reconcile", workspace });
+    s = workspaceTransition(s, { type: "pool.reconcile", workspace });
+  }
+  if (!poolEnabled) s = workspaceTransition(s, { type: "pool.disable" });
+  const active = selectActiveProject(workspace, s.projectId);
+  if (!liveReady || !dataReady || !active || !fresh(s)) return s;
+  s = workspaceTransition(s, { type: "project.enter", projectId: active.id, workspace, expectedProjectId: s.projectId });
+  if (!fresh(s)) return s;
+  const { opened, historyOpened, creating } = selectionFields(s.selection);
+  const id = historyOpened ?? opened;
+  const choice = !creating && id && workspace.conversationsByProject.get(active.id)?.has(id) ? { id, history: !!historyOpened } : undefined;
+  return workspaceTransition(s, { type: "memory.remember", projectId: active.id, choice, expectedSelection: s.selection });
+}
+
 export function workspaceTransition(state: WorkspaceState, event: WorkspaceEvent): WorkspaceState {
   switch (event.type) {
+    case "workspace.sync": return syncWorkspace(state, event);
     case "project.select": return { ...state, creation: null, projectId: event.projectId, enteredProjectId: event.projectId, pendingCreated: null, selection: restoredChoice(state, event.projectId, event.workspace), pool: poolOpen(state.pool, false), notice: "" };
     case "project.enter": {
       if (state.projectId !== event.expectedProjectId) return state;
@@ -118,11 +184,12 @@ export function workspaceTransition(state: WorkspaceState, event: WorkspaceEvent
         projectId: event.projectId ?? state.projectId, enteredProjectId: event.projectId ?? state.enteredProjectId };
     }
     case "create.start": {
+      const seq = state.seq + 1;
       if (event.projectId === sharedPoolComposer) {
         const previous = withoutComposer(state.selection);
-        return { ...state, creation: { intent: event.intent, projectId: event.projectId }, notice: "", pool: poolOpen(state.pool, true), pendingCreated: null, selection: { kind: "pool-composer", underneath: previous.kind === "working" ? previous : { kind: "none" } } };
+        return { ...state, seq, creation: { id: seq, projectId: event.projectId }, notice: "", pool: poolOpen(state.pool, true), pendingCreated: null, selection: { kind: "pool-composer", underneath: previous.kind === "working" ? previous : { kind: "none" } } };
       }
-      return { ...state, creation: { intent: event.intent, projectId: event.projectId }, notice: "", pool: poolOpen(state.pool, false), projectId: event.projectId, pendingCreated: null, selection: { kind: "project-composer", projectId: event.projectId } };
+      return { ...state, seq, creation: { id: seq, projectId: event.projectId }, notice: "", pool: poolOpen(state.pool, false), projectId: event.projectId, pendingCreated: null, selection: { kind: "project-composer", projectId: event.projectId } };
     }
     case "create.close": {
       const selection = withoutComposer(state.selection);
@@ -134,10 +201,10 @@ export function workspaceTransition(state: WorkspaceState, event: WorkspaceEvent
     }
     case "created.open": return { ...state, creation: null, projectId: event.entry.projectId, enteredProjectId: event.entry.projectId, pendingCreated: event.entry, selection: { kind: "working", id: event.entry.id },
       pool: poolOpen(state.pool, false), layouts: selectPane(state.layouts, event.entry.projectId, event.entry.id), notice: "threadCreated", unplaced: state.unplaced.filter(item => item.threadId !== event.entry.id) };
-    case "spawn.project": return (state.creation?.intent ?? null) !== event.intent ? state : { ...state, pendingCreated: event.entry, enteredProjectId: event.entry.projectId, selection: { kind: "working", id: event.entry.id }, layouts: selectPane(state.layouts, event.entry.projectId, event.entry.id), notice: "threadCreated" };
+    case "spawn.project": return (state.creation?.id ?? null) !== event.creationId ? state : { ...state, pendingCreated: event.entry, enteredProjectId: event.entry.projectId, selection: { kind: "working", id: event.entry.id }, layouts: selectPane(state.layouts, event.entry.projectId, event.entry.id), notice: "threadCreated" };
     case "spawn.pool": {
-      const poolRequests = new Map(state.poolRequests); const removed = poolRequests.get(event.operation)?.has(event.entry.id); poolRequests.delete(event.operation);
-      const show = (state.creation?.intent ?? null) === event.intent;
+      const poolRequests = new Map(state.poolRequests); const removed = poolRequests.get(event.requestId)?.has(event.entry.id); poolRequests.delete(event.requestId);
+      const show = (state.creation?.id ?? null) === event.creationId;
       const result = removed ? { pool: state.pool, status: "removed" as const } : addPoolEntry(state.pool, { projectId: event.entry.projectId, threadId: event.entry.id });
       if (result.status === "added" || result.status === "present") {
         const pendingPool = new Map(state.pendingPool); pendingPool.set(event.entry.id, event.entry.projectId);
@@ -195,14 +262,14 @@ export function workspaceTransition(state: WorkspaceState, event: WorkspaceEvent
     }
     case "pool.remove": {
       const pendingPool = new Map(state.pendingPool); pendingPool.delete(event.id);
-      const poolRequests = new Map([...state.poolRequests].map(([operation, removed]) => [operation, new Set([...removed, event.id])]));
+      const poolRequests = new Map([...state.poolRequests].map(([requestId, removed]) => [requestId, new Set([...removed, event.id])]));
       return { ...state, pendingPool, poolRequests, pool: removePoolEntry(state.pool, event.id) };
     }
     case "pool.activate": return state.pool.active === event.id ? state : { ...state, pool: { ...state.pool, active: event.id } };
     case "pool.move": { const pool = movePoolEntry(state.pool, event.id, event.targetId, event.after); return pool === state.pool ? state : { ...state, pool }; }
     case "pool.resize": return { ...state, pool: { ...state.pool, sizes: event.sizes } };
-    case "pool.request": { const poolRequests = new Map(state.poolRequests); poolRequests.set(event.operation, new Set()); return { ...state, poolRequests }; }
-    case "pool.failed": { const poolRequests = new Map(state.poolRequests); poolRequests.delete(event.operation); return { ...state, poolRequests }; }
+    case "pool.request": { const seq = state.seq + 1, poolRequests = new Map(state.poolRequests); poolRequests.set(seq, new Set()); return { ...state, seq, poolRequests }; }
+    case "pool.failed": { const poolRequests = new Map(state.poolRequests); poolRequests.delete(event.requestId); return { ...state, poolRequests }; }
     case "pool.limit": return { ...state, poolLimitNotice: true };
     case "thread.hidden": {
       const { projectId, id } = event.entry; const layout = state.layouts[projectId];

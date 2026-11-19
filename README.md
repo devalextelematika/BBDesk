@@ -1,8 +1,15 @@
-﻿# BBDesk
+# BBDesk
 
 Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
+
+## What's new in 0.1.11
+
+- **Background threads:** Configure title substrings under Catalog → More settings to show new matching threads in project tabs only when an error or input request needs attention.
+- **Project overflow:** Access projects, Common threads and Shared pool through More projects when the navigation row is full; switch, create and reorder from the menu.
+- **Chat details:** Project chat headers show the provider and, when available from that chat's composer, its selected model and reasoning level.
+- **Reliability and compatibility:** Simplified workspace synchronization, shared interaction helpers and verification against the minimum supported SDK.
 
 ## What's new in 0.1.10
 
@@ -58,9 +65,13 @@ Connecting a project imports current work, queued work and pending questions. Ea
 
 Settings and history close on Escape and return keyboard focus to their opener. Thread search and the All threads/attention filter have been removed; the toolbar contains the application toggle and activity indicators. Project-conversation memory belongs to the current browser-tab session and does not change shared project settings. Native drafts and existing reading-position handling remain owned by their existing mechanisms.
 
+Project navigation stays on one row. Projects, Common threads and Shared pool that do not fit are available through More projects. Use the menu to switch, create a thread or reorder projects; the current chat stays mounted.
+
 ## Unified catalog
 
-One small settings button on the right of the top toolbar opens Catalog. It has two tabs, **Projects** and **Applications**, with a searchable compact list in each. Connected entries are green with a checked checkbox. Click the checkbox or its label to connect or disconnect immediately, without opening an entry or closing settings.
+One small settings button on the right of the top toolbar opens Catalog. **Projects** and **Applications** each provide a searchable compact list. Connected entries are green with a checked checkbox. Click the checkbox or its label to connect or disconnect immediately, without opening an entry or closing settings. **More settings** contains application split preferences and background-thread visibility.
+
+For background threads, enable **Show background threads only when attention is needed** and enter title substrings, one per line. The list saves when you leave the field. Matching ignores case and applies to new threads in all connected projects after enabling. During work, matching threads appear in activity indicators without project tabs. Errors and requests for your input bring them into the project until successful completion, when they disappear automatically. The original threads remain in BB; disabling the setting keeps the list.
 
 There are no duplicate selected lists, reorder controls, application opening actions, label editors or Undo controls in settings. Reorder projects and applications directly in their panels. **Done** closes Catalog; there is no separate save step. Common threads and Shared pool remain checkboxes in the Projects tab.
 
@@ -136,9 +147,9 @@ npm test -- tests/backend/synchronization-lifecycle.test.mjs
 
 Keep test files independent of module cache and execution order. Avoid restoring a production singleton through test-only exports; dispose its owning UI or harness instead. New TypeScript modules under `tests/` are included in type checking.
 
-Zod is the only production npm dependency. BB supplies React and the public SDK runtime to the built frontend. Development dependencies include the pinned SDK and its backend harness peers (`better-sqlite3`, `cron-parser`, `hono` and their required types), React/React DOM with Testing Library and jsdom for UI tests, TypeScript, and `css-tree` for CSS checks. Keep these test dependencies explicit even when the application does not import them directly.
+Zod and `@get-bb/plugin-sdk` are the production npm dependencies. The server bundles the SDK RPC contract helper. BB supplies React and the public SDK runtime to the built frontend. Development dependencies include the SDK backend harness peers (`better-sqlite3`, `cron-parser`, `hono` and their required types), React/React DOM with Testing Library and jsdom for UI tests, TypeScript, and `css-tree` for CSS checks. Keep these test dependencies explicit even when the application does not import them directly.
 
-The lockfile pins the tested dependency tree; the SDK declaration/harness pin is `0.6.94`. The BB CLI builds with its own SDK and can warn when that differs from the package pin. Record both versions when verifying a release. A successful build with one host SDK does not validate the entire declared compatibility range; repinning the SDK is a separate change. Use a separate clean production-dependency copy to check the Git-install build policy described in [publishing notes](docs/PUBLISHING.md).
+The lockfile pins the tested dependency tree; the SDK declaration/harness pin is `0.6.157`. That pin does not limit who can install BBDesk: BB checks `engines.bbPluginSdk`, whose floor stays at `0.6.94`. `npm run test:sdk-floor` runs the typecheck and the full suite against that floor SDK and then restores the pin. The BB CLI builds with its own SDK and can warn when that differs from the package pin. Record both versions when verifying a release. A successful build with one host SDK does not validate the entire declared compatibility range. Use a separate clean production-dependency copy to check the Git-install build policy described in [publishing notes](docs/PUBLISHING.md).
 
 Activity snapshots return the last confirmed state without waiting for SDK history reads. An initial snapshot can have `syncedAt: null`; background reconciliation publishes updates through `dashboard-changed`. Configuration mutations acknowledge durable settings writes and schedule activity import separately, so a later synchronization failure does not mean that saving settings failed.
 
@@ -155,9 +166,10 @@ Key files:
 - `state.ts`: thread inclusion and hiding rules, with explicit sidebar/server activity adapters.
 - `hooks/use-dashboard-snapshot.ts`: coalesced snapshot reads, realtime/reconnect refresh, and configuration revision guards.
 - `workspace-selectors.ts`: per-render thread/project/tracking indices, visibility, status, entry selection, history and project/pool models. Indices are rebuilt from current inputs so in-place updates cannot leave a persistent cache stale.
-- `workspace-transitions.ts`: pure workspace events and explicit conversation/composer selection, with pending operations kept separately.
-- `hooks/use-workspace.ts`, `hooks/use-workspace-actions.ts`: synchronous transition dispatch, compatible browser persistence, and SDK/RPC effects. See [workspace transitions](docs/WORKSPACE_TRANSITIONS.md) for the event table and race guards.
-- `app.tsx`: workspace coordination, navigation and view-model wiring.
+- `workspace-transitions.ts`: pure workspace events and explicit conversation/composer selection, with pending operations kept separately, plus the ordered `workspace.sync` pass that reconciles state with live data.
+- `hooks/use-workspace.ts`, `hooks/use-workspace-actions.ts`, `hooks/use-workspace-sync.ts`: synchronous transition dispatch, compatible browser persistence, SDK/RPC effects, and the per-render synchronization with its safeguard. See [workspace transitions](docs/WORKSPACE_TRANSITIONS.md) for the event table, synchronization pass and race guards.
+- `app.tsx`: workspace coordination, navigation and view-model wiring. `hooks/use-app-split.ts`, `hooks/use-thread-dragging.ts` and `components/launcher-list.tsx` hold the application split, window thread-drag state and launcher list.
+- `dom-utils.ts`, `browser-storage.ts`, `components/split-divider.tsx`: shared drop-side, resize observation, focus wrapping, optional browser storage and column separator.
 - `workspace-view-models.ts`: project/pool presentation data, including cached titles, details and status within one render.
 - `components/project-workspace.tsx`, `components/shared-pool-workspace.tsx`: separate project/pool views with typed data and domain actions.
 - `components/workspace-chat.tsx`: native chat wrapper, file surface, permission memory and reading lifecycle shared by both views.
@@ -173,7 +185,7 @@ Existing RPC methods and whole-list replacement behavior remain available. See [
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-Version `0.1.10` is a patch update from `0.1.9`. See the [changelog](CHANGELOG.md) and [v0.1.10 release notes](docs/releases/v0.1.10.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.10`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
+Version `0.1.11` is a patch update from `0.1.10`. See the [changelog](CHANGELOG.md) and [v0.1.11 release notes](docs/releases/v0.1.11.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.11`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
 
 ## License
 

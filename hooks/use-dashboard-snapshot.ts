@@ -15,7 +15,8 @@ export function useDashboardSnapshot() {
   const report = useCallback((cause: unknown) => {
     const message = cause instanceof Error ? cause.message : String(cause);
     setError(message.includes("DASHBOARD_PROJECT_UNAVAILABLE") ? "projectGone"
-      : message.includes("DASHBOARD_THREAD_UNAVAILABLE") ? "threadUnavailable" : "actionFailed");
+      : message.includes("DASHBOARD_THREAD_UNAVAILABLE") ? "threadUnavailable"
+      : message.includes("DASHBOARD_THREAD_BUSY") ? "threadBusy" : "actionFailed");
   }, []);
   const refresh = useCallback(async () => {
     if (requestRunning.current) { requestAgain.current = true; return; }

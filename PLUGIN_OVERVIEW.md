@@ -3,6 +3,7 @@ Keep ongoing conversations, project activity and application shortcuts within re
 ## What you get
 
 - Follow selected projects in your preferred order and see running work, completed results, requests for attention and agent provider icons.
+- Optionally keep new background threads out of project tabs until an error or input request needs attention, using title substrings configured in Catalog → More settings.
 - Read and continue conversations inline using BB's native chat and composer.
 - Open conversations side by side from tabs or history, resize their columns and return to saved layouts in the same browser.
 - Pin conversations from connected projects into a Shared pool, reorder their columns and create new conversations directly in the pool.
@@ -17,7 +18,7 @@ Keep ongoing conversations, project activity and application shortcuts within re
 
 Choose projects and application shortcuts in BBDesk. Project and shortcut preferences are shared across clients of the same BB server. The interface language is also shared; it changes BBDesk labels while user content and native BB controls retain their own language.
 
-Use Catalog’s Projects and Applications tabs to connect or disconnect entries with a checkbox. Connected rows are green; changes apply immediately. Search names within the current tab. Reorder projects and applications directly in their panels. Drag a conversation into the workspace or use Open alongside to add a chat column. Split layouts and widths stay local to your browser. Closing a column leaves its thread available.
+Use Catalog’s Projects and Applications tabs to connect or disconnect entries with a checkbox. Connected rows are green; changes apply immediately. Search names within the current tab. Project navigation uses a More menu when the row is full. Reorder projects and applications directly in their panels. Drag a conversation into the workspace or use Open alongside to add a chat column. Split layouts and widths stay local to your browser. Closing a column leaves its thread available.
 
 Drag conversations onto Shared pool or pin them from tabs or history. Pool membership and layout stay in this browser. Removing a pool column only unpins it. Turn the pool off in Catalog without forgetting its contents; this visibility setting is shared across clients. Conversations from disconnected projects remain listed as unavailable.
 

@@ -3,9 +3,9 @@ import { catalogEntries } from "./catalog-model";
 import type { CatalogChange } from "./catalog-config";
 import { useCatalogActions } from "./hooks/use-catalog-actions";
 import { useTranslation } from "./use-translation";
-import type { DashboardConfig } from "./contracts";
+import { catalogChangeSchema, type DashboardConfig } from "./contracts";
+import { trapTab } from "./dom-utils";
 
-export type CatalogFilter = "all" | "project" | "app";
 const tabs = ["project", "app", "settings"] as const;
 type Props = {
   internalSplit: boolean;
@@ -15,22 +15,30 @@ type Props = {
   apps: readonly { id: string; label: string; isDisabled: boolean; isLoading: boolean }[];
   appsReady: boolean;
   projectsStatus: string;
-  initialFilter: CatalogFilter;
   opener: RefObject<HTMLElement | null>;
   change: (operation: CatalogChange) => Promise<DashboardConfig>;
-  onApp: (id: string) => void;
   onClose: () => void;
 };
 
 export function Catalog(props: Props) {
-  const { config, projects, apps, appsReady, initialFilter, change, onClose, opener } = props;
+  const { config, projects, apps, appsReady, change, onClose, opener } = props;
   const { t: tr, language } = useTranslation();
   const action = useCatalogActions(change);
   const root = useRef<HTMLElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const [filter, setFilter] = useState<typeof tabs[number]>(initialFilter === "app" ? "app" : "project");
+  const [filter, setFilter] = useState<typeof tabs[number]>("project");
   const [query, setQuery] = useState("");
+  const [backgroundText, setBackgroundText] = useState(() => config.backgroundThreads?.substrings.join("\n") ?? "");
+  const [backgroundInvalid, setBackgroundInvalid] = useState(false);
   const busy = action.pending;
+  function saveBackground(enabled = config.backgroundThreads?.enabled ?? false) {
+    const substrings = backgroundText.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    const parsed = catalogChangeSchema.safeParse({ type: "background", enabled, substrings });
+    setBackgroundInvalid(!parsed.success);
+    if (!parsed.success) return;
+    if (enabled === (config.backgroundThreads?.enabled ?? false) && JSON.stringify(substrings) === JSON.stringify(config.backgroundThreads?.substrings ?? [])) return;
+    void action.run(parsed.data, saved => setBackgroundText(saved.backgroundThreads?.substrings.join("\n") ?? ""));
+  }
   const entries = catalogEntries(config, projects, apps);
   // Keep disconnected/unavailable saved entries removable in the same list.
   for (const entry of config.launcher) {
@@ -62,18 +70,8 @@ export function Catalog(props: Props) {
   const errorText = String(action.error).includes("DASHBOARD_PROJECT_UNAVAILABLE") ? tr("projectGone") : String(action.error).includes("DASHBOARD_CATALOG_LIMIT") ? tr("catalogLimit") : String(action.error).includes("DASHBOARD_CATALOG_STALE") ? tr("catalogStale") : tr("actionFailed");
   return <section ref={root} className="db-catalog-overlay" role="dialog" aria-modal="true" aria-label={tr("catalogTitle")} onKeyDown={event => {
     if (event.defaultPrevented) return;
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
-    if (event.key === "Tab") {
-      const focusable = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]') ?? [])
-        .filter(element => {
-          for (let node: HTMLElement | null = element; node && node !== root.current; node = node.parentElement) {
-            if (node.hidden || getComputedStyle(node).display === "none") return false;
-          }
-          return true;
-        });
-      const first = focusable[0], last = focusable.at(-1);
-      if (first && last && (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
-    }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (filter === "settings") saveBackground(); onClose(); }
+    if (root.current) trapTab(event, root.current, 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]', true);
   }}>
     <div className="db-catalog-window">
       <header className="db-catalog-heading"><div><h2>{tr("catalogTitle")}</h2><p>{tr("catalogSubtitle")}</p></div><button type="button" className="db-button" onClick={onClose}>{tr("catalogDone")}</button></header>
@@ -88,11 +86,22 @@ export function Catalog(props: Props) {
             }
           }}>{tr(kind === "settings" ? "extraSettings" : kind === "project" ? "projects" : "catalogApps")}</button>)}
       </div>
-      <div className="db-catalog-browse" role="tabpanel" id="db-catalog-panel" aria-labelledby={`db-catalog-tab-${filter}`}>
+      <div className="db-catalog-browse" data-settings={filter === "settings" || undefined} role="tabpanel" id="db-catalog-panel" aria-labelledby={`db-catalog-tab-${filter}`}>
         {filter === "settings" ? <div className="db-catalog-special"><label>
           <input type="checkbox" checked={props.internalSplit} onChange={event => props.onInternalSplit(event.target.checked)}/>
           {tr("internalSplitSetting")}
-        </label><p className="db-muted">{tr("internalSplitDescription")}</p></div> : <>
+        </label><p className="db-muted">{tr("internalSplitDescription")}</p>
+        <div className="db-background-settings">
+          <label><input type="checkbox" data-background-toggle checked={config.backgroundThreads?.enabled ?? false} disabled={busy}
+            onChange={event => saveBackground(event.target.checked)}/>{tr("backgroundSetting")}</label>
+          <label className="db-background-label" htmlFor="db-background-substrings">{tr("backgroundSubstrings")}</label>
+          <textarea id="db-background-substrings" className="db-input db-background-input" rows={5} value={backgroundText} disabled={busy}
+            aria-describedby="db-background-description" aria-invalid={backgroundInvalid}
+            onChange={event => { setBackgroundText(event.target.value); setBackgroundInvalid(false); }}
+            onBlur={event => { if (!(event.relatedTarget instanceof HTMLElement && event.relatedTarget.hasAttribute("data-background-toggle"))) saveBackground(); }}/>
+          <p id="db-background-description" className="db-muted">{tr("backgroundDescription")}</p>
+          {backgroundInvalid && <p role="alert">{tr("backgroundLimit")}</p>}
+        </div></div> : <>
         <input ref={input} className="db-input" aria-label={tr("catalogSearch")} placeholder={tr("catalogSearch")} type="search" value={query} onChange={event => setQuery(event.target.value)}/>
         <div className="db-catalog-results" aria-busy={busy}>
           {filter === "project" && props.projectsStatus !== "ready" && <p role="status" className="db-muted">{tr(props.projectsStatus === "error" ? "syncFailed" : "loadingProjects")}</p>}

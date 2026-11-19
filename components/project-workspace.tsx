@@ -1,5 +1,5 @@
 import type { Ref } from "react";
-import type { NewThreadComposerProps } from "@get-bb/plugin-sdk/app";
+import { experimental_useProviders as useProviders, useComposers, type NewThreadComposerProps } from "@get-bb/plugin-sdk/app";
 import { ThreadTabs } from "../thread-tabs";
 import { SplitWorkspace } from "../split-workspace";
 import { startThreadDrag } from "../split-layout";
@@ -11,6 +11,18 @@ import { SmallButton } from "./workspace-button";
 import { ExpandedChat } from "./workspace-chat";
 import type { ProjectWorkspaceView } from "../workspace-view-models";
 import type { Translator } from "../i18n";
+
+function ThreadModelSummary({ threadId, providerId }: { threadId: string; providerId: string }) {
+  const composers = useComposers();
+  const { providers } = useProviders();
+  const selection = composers.find(({ scope, selection }) =>
+    scope.kind === "thread" && scope.threadId === threadId && selection
+  )?.selection;
+  const selectedProviderId = selection?.providerId || providerId;
+  const provider = providers.find(entry => entry.id === selectedProviderId)?.displayName || selectedProviderId;
+  const summary = [provider, selection?.model, selection?.reasoningLevel].filter(Boolean).join(" · ");
+  return summary && <span className="db-thread-model" title={summary}>{summary}</span>;
+}
 
 export interface ProjectWorkspaceActions {
   create(): void; closeCreate(): void; submit: NewThreadComposerProps["onSubmit"];
@@ -25,7 +37,7 @@ export function ProjectWorkspace({ projectId, model, actions, historyRef, tr }: 
   return <section className="db-project db-project-workspace" data-single-chat={!model.history.open} data-history-open={model.history.open} key={projectId} id={`db-project-panel-${projectId}`} role="tabpanel" aria-labelledby={`db-project-tab-${projectId}`}>
     <div className="db-thread-workspace" id="db-thread-workspace" inert={model.compact && model.history.open && !model.dragging || undefined}>
       {model.creating && <div className="db-create"><div className="db-chat-heading"><strong>{tr("newThreadTitle", { name: model.project.name })}</strong><SmallButton label={tr("closeCreate")} icon="X" onClick={actions.closeCreate}/></div><div className="db-new-composer"><NewThreadComposer key={projectId} defaultProjectId={projectId} draftKey={`dashboard-new-${projectId}`} placeholder={tr("promptPlaceholder")} layout="document" onSubmit={actions.submit}/></div></div>}
-      {model.openingId && <div className="db-chat"><div className="db-chat-heading"><span role="status">{tr("openingThread")}</span></div><ExpandedChat threadId={model.openingId} fillSpace/></div>}
+      {model.openingId && <div className="db-chat"><div className="db-chat-heading"><span role="status">{tr("openingThread")}</span></div><ExpandedChat threadId={model.openingId}/></div>}
       {model.showConversations && <SplitWorkspace
         projectId={projectId} ids={model.split.ids} activeId={model.split.activeId} sizes={model.split.sizes}
         onActivate={actions.activate} onAdd={actions.add} onResize={actions.resize}
@@ -33,9 +45,14 @@ export function ProjectWorkspace({ projectId, model, actions, historyRef, tr }: 
           const displayed = model.split.panes.get(id)!;
           return <div className="db-thread" key={displayed.id}>
             <div className="db-thread-line"><button type="button" className="db-thread-open" title={displayed.heading} aria-expanded="true" aria-controls={`chat-${displayed.id}`} onClick={() => split ? actions.activate(id) : actions.toggle(id)}>
-              <ThreadIndicator tone={displayed.state.tone}/><span className="db-thread-text"><span className="db-thread-title">{displayed.title}{displayed.draft && tr("draftSuffix")}</span></span><span className={`db-state ${displayed.state.tone}`}>{displayed.state.text}</span>{!split && <Icon name="ChevronUp" className="db-icon"/>}</button>{split && <SmallButton label={tr("closeSplit", { name: displayed.title })} icon="X" onClick={() => actions.closePane(id)}/>}
+              <ThreadIndicator tone={displayed.state.tone}/>
+              <span className="db-thread-text">
+                <span className="db-thread-title">{displayed.title}{displayed.draft && tr("draftSuffix")}</span>
+                <ThreadModelSummary threadId={displayed.id} providerId={displayed.providerId}/>
+              </span>
+              <span className={`db-state ${displayed.state.tone}`}>{displayed.state.text}</span>{!split && <Icon name="ChevronUp" className="db-icon"/>}</button>{split && <SmallButton label={tr("closeSplit", { name: displayed.title })} icon="X" onClick={() => actions.closePane(id)}/>}
             </div>
-            <div className="db-chat" id={`chat-${displayed.id}`}><ExpandedChat threadId={displayed.id} fillSpace/></div>
+            <div className="db-chat" id={`chat-${displayed.id}`}><ExpandedChat threadId={displayed.id}/></div>
           </div>;
         }}/>}
       {model.empty && <div className="db-project-empty">{tr(model.emptyMessage)}</div>}

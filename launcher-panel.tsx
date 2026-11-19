@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { useTranslation } from "./use-translation";
+import { readStored, writeStored } from "./browser-storage";
+import { useElementWidth } from "./dom-utils";
 
 const storageKey = "bb-dashboard:launcher-layout:v1";
 const defaultWidth = 208;
@@ -8,25 +10,25 @@ const minWidth = 176;
 const maxWidth = 480;
 
 function readLayout(): { open: boolean; width: number } {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
+  return readStored(storageKey, raw => {
+    const stored = raw as { open?: unknown; width?: unknown } | null;
     return {
       open: typeof stored?.open === "boolean" ? stored.open : true,
       width: typeof stored?.width === "number" && Number.isFinite(stored.width)
         ? Math.min(maxWidth, Math.max(minWidth, stored.width)) : defaultWidth,
     };
-  } catch { return { open: true, width: defaultWidth }; }
+  }, { open: true, width: defaultWidth });
 }
 
 // Layout belongs to this browser, independently of the shared launcher entries.
 export function useLauncherPanel() {
   const { t: tr } = useTranslation();
   const [layout, setLayout] = useState(readLayout);
-  const [containerWidth, setContainerWidth] = useState(0);
   const [compactOpen, setCompactOpen] = useState(false);
   const [compactWidth, setCompactWidth] = useState<number | null>(null);
   const [resizing, setResizing] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const containerWidth = useElementWidth(root);
   const panel = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const drag = useRef<{ id: number; startX: number; startWidth: number } | null>(null);
@@ -46,21 +48,7 @@ export function useLauncherPanel() {
     finishResize();
   }, [compact]);
 
-  useEffect(() => {
-    if (!root.current) return;
-    const measure = () => setContainerWidth(root.current?.clientWidth ?? 0);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(root.current);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (resizing) return;
-    try { window.localStorage.setItem(storageKey, JSON.stringify(layout)); }
-    catch { /* Storage can be unavailable; the panel still works for this session. */ }
-  }, [layout, resizing]);
+  useEffect(() => { if (!resizing) writeStored(storageKey, layout); }, [layout, resizing]);
 
   function finishResize() { drag.current = null; setResizing(false); }
   useEffect(() => {

@@ -14,6 +14,8 @@ export interface Activity {
   backgroundAgents?: number;
   backgroundCommands?: number;
   workflows?: number;
+  displayTitle?: string;
+  createdAt?: number | null;
 }
 export interface TrackedThread {
   id: string;
@@ -21,6 +23,18 @@ export interface TrackedThread {
   visible: boolean;
   latestAttentionAt: number;
   hiddenAttentionAt: number;
+  backgroundMatched?: boolean;
+  backgroundExposed?: boolean;
+}
+export type BackgroundRules = { enabled: boolean; substrings: readonly string[]; since: number };
+export function matchesBackground(t: Pick<Activity, "displayTitle" | "createdAt">, rules?: BackgroundRules): boolean {
+  return !!rules?.enabled && t.createdAt != null && t.createdAt >= rules.since
+    && rules.substrings.some(value => value.trim() && (t.displayTitle ?? "").toLowerCase().includes(value.trim().toLowerCase()));
+}
+export function backgroundState(t: Activity, previous?: TrackedThread, rules?: BackgroundRules) {
+  const matched = !!rules?.enabled && (previous?.backgroundMatched === true || matchesBackground(t, rules));
+  const exposed = matched && (t.hasPendingInteraction || hasThreadFailure(t) || previous?.backgroundExposed === true && hasWork(t));
+  return { matched, exposed };
 }
 /** Explicit adapters for the two public SDK activity shapes. */
 export function sidebarActivity(t: Activity & { activity: { backgroundAgents: number; backgroundCommands: number; workflows: number } }): Activity {
@@ -57,7 +71,13 @@ export function isFinishedSubagent(t: Activity): boolean {
   // Read state and the selected chat affect the badge, never the worker's lifecycle.
   return isSubagent(t) && !hasWork(t) && !hasThreadFailure(t);
 }
-export function reconcileThread(previous: TrackedThread | undefined, t: Activity, connectedAt: number): TrackedThread | undefined {
+export function reconcileThread(previous: TrackedThread | undefined, t: Activity, connectedAt: number, rules?: BackgroundRules): TrackedThread | undefined {
+  const background = backgroundState(t, previous, rules);
+  if (background.matched) return {
+    id: t.id, projectId: t.projectId, visible: background.exposed,
+    latestAttentionAt: t.latestAttentionAt, hiddenAttentionAt: previous?.hiddenAttentionAt ?? 0,
+    backgroundMatched: true, backgroundExposed: background.exposed,
+  };
   if (isFinishedSubagent(t)) return previous ? {
     ...previous, visible: false, latestAttentionAt: t.latestAttentionAt,
     hiddenAttentionAt: Math.max(previous.hiddenAttentionAt, t.latestAttentionAt),
@@ -73,6 +93,6 @@ export function reconcileThread(previous: TrackedThread | undefined, t: Activity
   };
 }
 export function hideThread(previous: TrackedThread, current: Activity): TrackedThread {
-  if (hasWork(current)) throw new Error("Скрыть можно после завершения работы и ответа на запросы BB.");
+  if (hasWork(current)) throw new Error("DASHBOARD_THREAD_BUSY");
   return { ...previous, visible: false, latestAttentionAt: current.latestAttentionAt, hiddenAttentionAt: current.latestAttentionAt };
 }

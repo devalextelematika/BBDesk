@@ -1,20 +1,38 @@
-import { readFile } from "node:fs/promises";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 
-export const corruptText = /(?:Р[А-Яа-яЁёЀ-ӿ\u00A0-\u00BF]|С[Ђ-Џ\u0080-\u00BF\u2010-\u203F]){2,}|Рџ|Рњ|Рќ|РЎ|СЃ|С‚|вЂ[¦”–]|[ÐÑ][\u0080-\u00BF]|[\uFFFD\u0098]/u;
-const sources = ["app.tsx", "launcher-navigation.tsx", "launcher-panel.tsx", "project-tabs.tsx", "thread-tabs.tsx", "server.ts", "state.ts", "package.json", "components/ui/icon.tsx", "components/thread-indicator.tsx", "i18n.ts", "use-translation.ts", "locales/en.ts", "locales/ru.ts", "README.md", "PLUGIN_OVERVIEW.md", "docs/PUBLISHING.md", "skills/dashboard/SKILL.md"];
-sources.push("split-layout.ts", "split-workspace.tsx", "catalog.tsx", "catalog-model.ts", "catalog-config.ts", "hooks/use-catalog-actions.ts", "activity-sync.ts", "contracts.ts", "configuration.ts", "docs/RPC_COMPATIBILITY.md");
-sources.push("workspace-selectors.ts", "hooks/use-dashboard-snapshot.ts");
-sources.push("thread-completion.ts", "hooks/use-thread-completion.ts");
-sources.push("workspace-transitions.ts", "hooks/use-workspace.ts", "hooks/use-workspace-actions.ts", "docs/WORKSPACE_TRANSITIONS.md");
-const workspaceViews = ["components/project-workspace.tsx", "components/shared-pool-workspace.tsx", "components/workspace-chat.tsx", "components/workspace-button.tsx"];
-sources.push("workspace-view-models.ts", ...workspaceViews);
-for (const name of sources) {
-  const bytes = await readFile(new URL("../" + name, import.meta.url));
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+export const corruptText = /(?:Р[А-Яа-яЁёЀ-ӿ -¿]|С[Ђ-Џ\u0080-¿‐-‿]){2,}|Рџ|Рњ|Рќ|РЎ|СЃ|С‚|вЂ[¦”–]|[ÐÑ][\u0080-¿]|[�\u0098]/u;
+
+// Discover files instead of listing them, so new modules are checked too. Walk the
+// directory rather than asking git: a ZIP or npm copy has no .git directory.
+const root = new URL("..", import.meta.url);
+const rootPath = decodeURIComponent(root.pathname).replace(/^\/([A-Za-z]:)/, "$1");
+const skipDirectories = new Set(["node_modules", "dist", ".git", "coverage", "test-results", "verification", "local"]);
+const textFile = /\.(?:ts|tsx|mjs|js|css|md|json|yml|yaml|svg)$/;
+function discover(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return skipDirectories.has(entry.name) ? [] : discover(path);
+    // Machine-local notes (gitignored) and the lockfile are not authored sources.
+    if (!textFile.test(entry.name) || entry.name.endsWith("-verification.md") || entry.name === "package-lock.json") return [];
+    return [relative(rootPath, path).split(sep).join("/")];
+  });
+}
+const files = discover(rootPath).sort();
+
+// These files hold the mojibake patterns on purpose, to detect them.
+const mojibakeFixtures = new Set(["scripts/check-ui.mjs", "tests/ui/catalog-navigation.test.mjs"]);
+for (const name of files.filter(name => !mojibakeFixtures.has(name))) {
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(join(rootPath, name)));
   if (corruptText.test(text)) throw new Error("Corrupt text encoding in " + name);
 }
-for (const name of ["app.tsx", "project-tabs.tsx", "thread-tabs.tsx", "launcher-panel.tsx", "catalog.tsx", ...workspaceViews]) {
-  const text = await readFile(new URL("../" + name, import.meta.url), "utf8");
-  if (/[\u0400-\u04ff]/u.test(text)) throw new Error("Move authored UI text into the language catalogs: " + name);
+
+// User-visible text lives in the language catalogs. Tests may use any text, and
+// the language setting names each language in its own script.
+const authoredTextAllowed = new Set(["i18n.ts"]);
+const sources = files.filter(name => /\.tsx?$/.test(name) && !name.startsWith("locales/") && !name.startsWith("tests/")
+  && !/\.test\.tsx?$/.test(name) && !authoredTextAllowed.has(name));
+for (const name of sources) {
+  if (/[Ѐ-ӿ]/u.test(readFileSync(join(rootPath, name), "utf8"))) throw new Error("Move authored text into the language catalogs: " + name);
 }
-console.log("UTF-8 and localized UI source checks passed.");
+console.log(`UTF-8 check passed for ${files.length} files; localized source check passed for ${sources.length} modules.`);

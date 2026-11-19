@@ -1,9 +1,9 @@
-import { conversationItem, completionTooltip, statusOf, selectThreadTabs, type Thread, type WorkspaceModel, type selectProjectWorkspace, type selectPoolWorkspace } from "./workspace-selectors";
+import { conversationItem, completionTooltip, firstById, statusOf, selectThreadTabs, type Thread, type WorkspaceModel, type selectProjectWorkspace, type selectPoolWorkspace } from "./workspace-selectors";
 import type { SplitLayout } from "./split-layout";
 import type { Translator } from "./i18n";
 
 type Project = ReturnType<WorkspaceModel["projectsById"]["get"]>;
-type ConversationPresentation = { id: string; title: string; state: ReturnType<typeof statusOf>; metadata: ReturnType<typeof conversationItem>; draft: boolean; heading: string };
+type ConversationPresentation = { id: string; title: string; providerId: string; state: ReturnType<typeof statusOf>; metadata: ReturnType<typeof conversationItem>; draft: boolean; heading: string };
 export function projectWorkspaceView({ projectId, project, selected, threadsById, layout, opened, historyOpened, creating, historyExpanded, compact, dragging, drafts, workingIds, poolIds, saving }: {
   projectId: string; project: Project; selected: ReturnType<typeof selectProjectWorkspace>; layout?: SplitLayout;
   opened: string | null; historyOpened: string | null; creating: string | null; historyExpanded: boolean; compact: boolean; dragging: boolean;
@@ -11,14 +11,13 @@ export function projectWorkspaceView({ projectId, project, selected, threadsById
 }, tr: Translator) {
   const tabs = selectThreadTabs(selected.rows, workingIds, drafts, tr);
   const tabById = new Map(tabs.map(tab => [tab.id, tab]));
-  const rowById = new Map<string, Thread>();
-  for (const row of selected.rows) if (!rowById.has(row.id)) rowById.set(row.id, row);
+  const rowById = firstById(selected.rows);
   const presentation = new Map<Thread, ConversationPresentation>();
   function present(thread: Thread): ConversationPresentation {
     const cached = presentation.get(thread); if (cached) return cached;
     const tab = rowById.get(thread.id) === thread ? tabById.get(thread.id) : undefined, state = tab ? { text: tab.status, tone: tab.tone } : statusOf(thread, tr);
     const metadata = conversationItem(thread);
-    const result = { id: thread.id, title: thread.displayTitle, state, metadata, draft: drafts.has(thread.id),
+    const result = { id: thread.id, title: thread.displayTitle, providerId: thread.providerId, state, metadata, draft: drafts.has(thread.id),
       heading: `${thread.displayTitle} · ${metadata.detail} · ${state.text}${completionTooltip(thread, tr) ? ` · ${completionTooltip(thread, tr)}` : ""}` };
     presentation.set(thread, result); return result;
   }

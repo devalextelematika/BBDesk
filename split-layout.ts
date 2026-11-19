@@ -1,4 +1,5 @@
 import type { DragEvent } from "react";
+import { readStored, writeStored } from "./browser-storage";
 
 export type SplitLayout = { ids: string[]; active: string; sizes: Record<string, number> };
 export type SplitLayouts = Record<string, SplitLayout>;
@@ -11,8 +12,7 @@ export function startThreadDrag(event: DragEvent, projectId: string, threadId: s
 }
 
 export function readSplitLayouts(): SplitLayouts {
-  try {
-    const raw: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
+  return readStored(storageKey, raw => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
     const result: SplitLayouts = {};
     for (const [project, value] of Object.entries(raw).slice(-100)) {
@@ -25,13 +25,10 @@ export function readSplitLayouts(): SplitLayouts {
       result[project] = { ids, active: ids.includes(row.active ?? "") ? row.active! : ids[0]!, sizes };
     }
     return result;
-  } catch { return {}; }
+  }, {});
 }
 
-export function saveSplitLayouts(layouts: SplitLayouts) {
-  try { window.localStorage.setItem(storageKey, JSON.stringify(layouts)); }
-  catch { /* Resizing and navigation also work with blocked browser storage. */ }
-}
+export function saveSplitLayouts(layouts: SplitLayouts) { writeStored(storageKey, layouts); }
 
 export function selectSplitThread(layout: SplitLayout, id: string): SplitLayout {
   if (layout.ids.includes(id)) return { ...layout, active: id };
@@ -57,8 +54,8 @@ export type AppSplitLayout = { appIds: string[]; order: string[]; sizes: Record<
 export const emptyAppSplit = (): AppSplitLayout => ({ appIds: [], order: [], sizes: {} });
 
 export function readAppSplit(): AppSplitLayout {
-  try {
-    const row = JSON.parse(window.localStorage.getItem(appSplitStorageKey) ?? "null") as Partial<AppSplitLayout> | null;
+  return readStored(appSplitStorageKey, raw => {
+    const row = raw as Partial<AppSplitLayout> | null;
     if (!Array.isArray(row?.appIds)) return emptyAppSplit();
     const appIds = [...new Set(row.appIds.filter(validId))].slice(0, 100);
     const ids = new Set([appWorkspaceId, ...appIds]);
@@ -68,13 +65,10 @@ export function readAppSplit(): AppSplitLayout {
       return typeof size === "number" && Number.isFinite(size) && size > 0 ? [[id, size]] : [];
     }));
     return { appIds, order, sizes };
-  } catch { return emptyAppSplit(); }
+  }, emptyAppSplit());
 }
 
-export function saveAppSplit(layout: AppSplitLayout) {
-  try { window.localStorage.setItem(appSplitStorageKey, JSON.stringify(layout)); }
-  catch { /* The layout still works with blocked browser storage. */ }
-}
+export function saveAppSplit(layout: AppSplitLayout) { writeStored(appSplitStorageKey, layout); }
 
 export function readThreadDrag(transfer: { getData(type: string): string }): PoolEntry | null {
   try {
@@ -86,8 +80,7 @@ export function readThreadDrag(transfer: { getData(type: string): string }): Poo
 }
 
 export function readSharedPool(): SharedPool {
-  try {
-    const raw: unknown = JSON.parse(window.localStorage.getItem(poolStorageKey) ?? "null");
+  return readStored(poolStorageKey, raw => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return emptyPool();
     const row = raw as Partial<SharedPool>;
     if (!Array.isArray(row.entries)) return emptyPool();
@@ -108,13 +101,10 @@ export function readSharedPool(): SharedPool {
       entries, sizes, open: row.open === true,
       active: entries.some(entry => entry.threadId === row.active) ? row.active! : entries[0]?.threadId ?? "",
     };
-  } catch { return emptyPool(); }
+  }, emptyPool());
 }
 
-export function saveSharedPool(pool: SharedPool) {
-  try { window.localStorage.setItem(poolStorageKey, JSON.stringify(pool)); }
-  catch { /* Pinning and navigation also work with blocked browser storage. */ }
-}
+export function saveSharedPool(pool: SharedPool) { writeStored(poolStorageKey, pool); }
 
 export function addPoolEntry(pool: SharedPool, entry: PoolEntry, target?: string, after = true): PoolAddition {
   if (!validId(entry.projectId) || !validId(entry.threadId)) return { pool, status: "invalid" };

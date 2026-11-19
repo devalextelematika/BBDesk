@@ -98,11 +98,12 @@ test('project and pool models preserve captions, counts, pending threads and dis
   assert.deepEqual(conversationItem(row('detail', { latestAttentionAt: 0, createdAt: 42, environment: { branchName: 'branch' } })), { id: 'detail', title: 'detail', detail: 'branch', updatedAt: 42 });
 });
 
-test('workspace indices rebuild from in-place updates and preserve first matches and duplicate tombstones', () => {
+test('workspace indices rebuild from in-place updates and preserve first SDK matches', () => {
   const threads = [row('t')];
-  const tracked = [{ id: 't', projectId: 'p1', visible: false, hiddenAttentionAt: 200, latestAttentionAt: 150 }, { id: 't', projectId: 'p1', visible: false, hiddenAttentionAt: 100, latestAttentionAt: 150 }];
+  // The server keeps one tracking row per thread id, so tracked rows are unique.
+  const tracked = [{ id: 't', projectId: 'p1', visible: false, hiddenAttentionAt: 200, latestAttentionAt: 150 }];
   assert.deepEqual(ids(model(threads, { tracked }).allThreads), []);
-  tracked[1].visible = true;
+  tracked[0].visible = true;
   assert.deepEqual(ids(model(threads, { tracked }).allThreads), ['t']);
   threads[0].isHidden = true; threads.push(row('t', { displayTitle: 'Visible duplicate' }), row('new'));
   const updated = model(threads, { opened: 't' });

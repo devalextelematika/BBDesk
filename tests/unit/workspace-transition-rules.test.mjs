@@ -22,14 +22,14 @@ const open = (s, id = 'a', projectId = 'p1', history = false) => step(s, { type:
 
 test('navigation and collapse cancel creation intents while pool composition keeps its project underlay', () => {
   let s = open(initial()); const chat = s.selection;
-  s = step(s, { type: 'create.start', projectId: sharedPoolComposer, intent: {} });
+  s = step(s, { type: 'create.start', projectId: sharedPoolComposer }); const poolComposer = s.creation.id;
   assert.equal(s.selection.underneath, chat); assert.equal(selectionFields(s.selection).opened, 'a');
   s = step(s, { type: 'create.close' }); assert.equal(s.selection, chat);
-  const intent = {}; s = step(s, { type: 'create.start', projectId: 'p1', intent });
-  assert.equal(s.creation.intent, intent);
+  s = step(s, { type: 'create.start', projectId: 'p1' }); const intent = s.creation.id;
+  assert.notEqual(intent, poolComposer);
   s = step(s, { type: 'project.select', projectId: 'p2', workspace });
   assert.equal(s.creation, null); assert.equal(selectionFields(s.selection).opened, 'other');
-  assert.equal(step(s, { type: 'spawn.project', entry: { id: 'late', projectId: 'p1' }, intent }), s);
+  assert.equal(step(s, { type: 'spawn.project', entry: { id: 'late', projectId: 'p1' }, creationId: intent }), s);
   s = step(s, { type: 'conversation.toggle', id: 'other' }); assert.equal(s.selection.kind, 'none');
   assert.equal(step(s, { type: 'project.enter', projectId: 'p2', workspace, expectedProjectId: 'p2' }), s);
 });
@@ -69,44 +69,47 @@ test('hide completion changes only the still-selected conversation and forgets i
 
 test('pool completions share the latest capacity and keep every result that cannot be pinned', () => {
   const entries = Array.from({ length: 49 }, (_, i) => ({ projectId: 'p1', threadId: 'p' + i }));
-  let s = initial({}, { entries, active: 'p0', sizes: {}, open: false }); const intent = {};
-  s = step(s, { type: 'create.start', projectId: sharedPoolComposer, intent });
-  const one = {}, two = {}; s = step(s, { type: 'pool.request', operation: one }); s = step(s, { type: 'pool.request', operation: two });
-  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'first' }, intent, operation: one, title: 'First' });
-  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'second' }, intent, operation: two, title: 'Second' });
+  let s = initial({}, { entries, active: 'p0', sizes: {}, open: false });
+  s = step(s, { type: 'create.start', projectId: sharedPoolComposer }); const intent = s.creation.id;
+  s = step(s, { type: 'pool.request' }); const one = s.seq; s = step(s, { type: 'pool.request' }); const two = s.seq;
+  assert.notEqual(one, two);
+  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'first' }, creationId: intent, requestId: one, title: 'First' });
+  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'second' }, creationId: intent, requestId: two, title: 'Second' });
   assert.equal(s.pool.entries.length, 50); assert.equal(s.pendingPool.get('first'), 'p1');
   assert.deepEqual(s.unplaced, [{ projectId: 'p1', threadId: 'second', title: 'Second', reason: 'limit' }]);
   assert.equal(s.poolRequests.size, 0);
 });
 
 test('successful completion retains the intent for another result from the same creation batch', () => {
-  const intent = {}; let projectState = step(initial(), { type: 'create.start', projectId: 'p1', intent });
-  for (const id of ['first', 'second']) projectState = step(projectState, { type: 'spawn.project', entry: { projectId: 'p1', id }, intent });
-  assert.equal(selectionFields(projectState.selection).opened, 'second'); assert.equal(projectState.creation.intent, intent);
-  let poolState = step(initial(), { type: 'create.start', projectId: sharedPoolComposer, intent });
+  let projectState = step(initial(), { type: 'create.start', projectId: 'p1' }); const intent = projectState.creation.id;
+  for (const id of ['first', 'second']) projectState = step(projectState, { type: 'spawn.project', entry: { projectId: 'p1', id }, creationId: intent });
+  assert.equal(selectionFields(projectState.selection).opened, 'second'); assert.equal(projectState.creation.id, intent);
+  let poolState = step(initial(), { type: 'create.start', projectId: sharedPoolComposer }); const poolIntent = poolState.creation.id;
   for (const id of ['first', 'second']) {
-    const operation = {}; poolState = step(poolState, { type: 'pool.request', operation });
-    poolState = step(poolState, { type: 'spawn.pool', entry: { projectId: 'p1', id }, intent, operation, title: id });
+    poolState = step(poolState, { type: 'pool.request' }); const requestId = poolState.seq;
+    poolState = step(poolState, { type: 'spawn.pool', entry: { projectId: 'p1', id }, creationId: poolIntent, requestId, title: id });
   }
   assert.deepEqual(poolState.pool.entries.map(e => e.threadId), ['first', 'second']);
   assert.equal(poolState.pool.active, 'second'); assert.equal(poolState.pendingCreated.id, 'second');
 });
 
 test('explicit unpin and navigation during spawn preserve user intent and independent requests', () => {
-  const intent = {}, operation = {}; let s = open(initial());
-  s = step(s, { type: 'create.start', projectId: sharedPoolComposer, intent }); s = step(s, { type: 'pool.request', operation });
+  let s = open(initial());
+  s = step(s, { type: 'create.start', projectId: sharedPoolComposer }); const intent = s.creation.id;
+  s = step(s, { type: 'pool.request' }); const operation = s.seq;
   s = step(s, { type: 'pool.remove', id: 'created' });
   s = step(s, { type: 'project.select', projectId: 'p2', workspace });
-  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'created' }, intent, operation, title: 'Created' });
+  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'created' }, creationId: intent, requestId: operation, title: 'Created' });
   assert.equal(s.pool.entries.length, 0); assert.equal(selectionFields(s.selection).opened, 'other');
   assert.equal(s.unplaced[0].reason, 'removed'); assert.equal(s.pool.open, false);
 });
 
 test('pool disable closes its composer but retains late results as pins without reopening', () => {
-  const intent = {}, operation = {}; let s = open(initial());
-  s = step(s, { type: 'create.start', projectId: sharedPoolComposer, intent }); s = step(s, { type: 'pool.request', operation });
+  let s = open(initial());
+  s = step(s, { type: 'create.start', projectId: sharedPoolComposer }); const intent = s.creation.id;
+  s = step(s, { type: 'pool.request' }); const operation = s.seq;
   s = step(s, { type: 'pool.disable' });
-  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'created' }, intent, operation, title: 'Created' });
+  s = step(s, { type: 'spawn.pool', entry: { projectId: 'p1', id: 'created' }, creationId: intent, requestId: operation, title: 'Created' });
   assert.equal(s.pool.open, false); assert.equal(s.pool.entries[0].threadId, 'created'); assert.equal(selectionFields(s.selection).opened, 'a');
 });
 
@@ -125,8 +128,8 @@ test('reconciliation retains pending chats and disconnected pool entries and dro
 });
 
 test('disconnecting a project with an active composer restores a valid fallback and rejects its late spawn', () => {
-  const intent = {}; let s = step(initial(), { type: 'create.start', projectId: 'p1', intent });
+  let s = step(initial(), { type: 'create.start', projectId: 'p1' }); const intent = s.creation.id;
   s = step(s, { type: 'project.enter', projectId: 'p2', expectedProjectId: 'p1', workspace: model(threads, ['p2']) });
   assert.equal(selectionFields(s.selection).opened, 'other'); assert.equal(s.selection.kind, 'working');
-  assert.equal(step(s, { type: 'spawn.project', entry: { id: 'late', projectId: 'p1' }, intent }), s);
+  assert.equal(step(s, { type: 'spawn.project', entry: { id: 'late', projectId: 'p1' }, creationId: intent }), s);
 });

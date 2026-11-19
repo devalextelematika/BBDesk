@@ -15,24 +15,24 @@ export function useWorkspaceActions(controller: ReturnType<typeof useWorkspace>,
   const { mounted, rpc, refresh, report } = snapshot;
   async function spawnProject(projectId: string, request: SpawnRequest) {
     if (request.projectId !== projectId) throw new Error(tr("projectMismatch"));
-    const intent = getState().creation?.intent ?? null;
+    const creationId = getState().creation?.id ?? null;
     try {
       const created = await sdk.threads.spawn(request);
-      if (mounted.current) { dispatch({ type: "spawn.project", entry: { id: created.id, projectId }, intent }); void refresh(); }
+      if (mounted.current) { dispatch({ type: "spawn.project", entry: { id: created.id, projectId }, creationId }); void refresh(); }
     } catch (cause) { if (mounted.current) report(cause); throw cause; }
   }
   async function spawnPool(request: SpawnRequest) {
     if (getState().pool.entries.length >= sharedPoolLimit) { dispatch({ type: "pool.limit" }); throw new Error(tr("poolFull")); }
-    const intent = getState().creation?.intent ?? null, operation = {};
-    dispatch({ type: "pool.request", operation });
+    const creationId = getState().creation?.id ?? null;
+    const requestId = dispatch({ type: "pool.request" }).seq;
     try {
       const created = await sdk.threads.spawn(request);
       if (!mounted.current) return;
       const title = request.input?.find(part => part.type === "text")?.text.trim().slice(0, 160) || tr("newThreadTitle", { name: namedProject(workspace, request.projectId, tr) });
-      dispatch({ type: "spawn.pool", entry: { id: created.id, projectId: request.projectId }, intent, operation, title });
+      dispatch({ type: "spawn.pool", entry: { id: created.id, projectId: request.projectId }, creationId, requestId, title });
       void refresh();
     } catch (cause) {
-      if (mounted.current) { dispatch({ type: "pool.failed", operation }); report(cause); }
+      if (mounted.current) { dispatch({ type: "pool.failed", requestId }); report(cause); }
       throw cause;
     }
   }
