@@ -4,6 +4,28 @@ import assert from 'node:assert/strict';
 const { changeCatalog } = await import('../../catalog-config.ts');
 const baseConfig = () => ({ projects: [{ id: 'p1', enabled: true, connectedAt: 1 }], launcher: [], sharedPool: true });
 
+for (const background of [false, true]) {
+  test(`closing a failed thread removes its tab and red indicators (background=${background})`, async () => {
+    const rows = [thread('bg', 'p1', 'Nightly worker', { createdAt: 1100, status: 'error', queuedWork: 'failed' })];
+    const tracked = [{ id: 'bg', projectId: 'p1', visible: true, latestAttentionAt: rows[0].latestAttentionAt, hiddenAttentionAt: 0,
+      ...(background ? { backgroundMatched: true, backgroundExposed: true } : {}) }];
+    const config = { ...baseConfig(), ...(background ? { backgroundThreads: { enabled: true, substrings: ['worker'], since: 1000 } } : {}) };
+    const slot = mount({ language: 'en', threads: rows, rpcOverrides: {
+      snapshot: () => structuredClone({ config, tracked, syncError: null, syncedAt: 150 }),
+      thread_hide: () => { tracked[0].visible = false; tracked[0].hiddenAttentionAt = rows[0].latestAttentionAt; return { hidden: true }; },
+    } });
+    await waitFor(() => assert.ok(slot.container.querySelector('.db-thread-tab .error')));
+    await act(async () => fireEvent.click(slot.container.querySelector('.db-thread-hide')));
+    await waitFor(() => assert.equal(slot.container.querySelectorAll('.db-thread-tab, .db-thread-indicator, .db-project-tab .error').length, 0));
+    assert.equal(slot.queryByTestId('bb-thread-chat'), null);
+    await act(async () => slot.lifecycle.rerender(createElement(app.navPanels[0].component, { subPath: '' })));
+    assert.equal(slot.container.querySelectorAll('.db-thread-tab, .db-thread-indicator').length, 0);
+    rows[0].latestAttentionAt += 1;
+    await act(async () => slot.lifecycle.rerender(createElement(app.navPanels[0].component, { subPath: '' })));
+    assert.ok(slot.container.querySelector('.db-thread-tab .error'));
+  });
+}
+
 test('multiline background settings save on blur, retain the list when disabled, and retry failed writes', async () => {
   let config = baseConfig(), fail = false;
   const operations = [];

@@ -1,4 +1,4 @@
-import { hasWork, isSubagent, isWorking, sidebarActivity } from "./state";
+import { hasWork, hasThreadFailure, isSubagent, isWorking, sidebarActivity } from "./state";
 import type { Thread } from "./workspace-selectors";
 
 export interface Completion {
@@ -28,7 +28,7 @@ export function observeCompletions(previous: CompletionState, threads: readonly 
     if (rows.has(thread.id) || isSubagent(thread)) continue;
     const before = previous.rows.get(thread.id);
     const working = isWorking(sidebarActivity(thread));
-    const successful = thread.status === "idle" && !hasWork(sidebarActivity(thread));
+    const successful = thread.status === "idle" && !hasWork(sidebarActivity(thread)) && !hasThreadFailure(thread);
     const finished = successful && !!before?.working && !before.stopping;
     const newUnread = successful && thread.isUnread && (!before || before.attention !== thread.latestAttentionAt
       || !before.unread && !before.at);

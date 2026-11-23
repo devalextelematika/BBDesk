@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { useTranslation } from "../use-translation";
 
 /**
@@ -18,6 +18,26 @@ export function SplitDivider<S>({ valueNow, style, measure, resize, reset, onDra
     drag.current = null;
     onDragging?.(false);
   }
+  useEffect(() => {
+    function move(event: PointerEvent) {
+      const current = drag.current;
+      if (!current || current.pointer !== event.pointerId) return;
+      event.preventDefault();
+      resize(event.clientX - current.x, current.start);
+    }
+    function end(event: PointerEvent) {
+      if (drag.current?.pointer !== event.pointerId) return;
+      finish();
+    }
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [resize]);
   return <div className="db-split-divider" role="separator" aria-orientation="vertical" tabIndex={0}
     aria-label={t("resizeSplit")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={valueNow} style={style}
     onPointerDown={event => {
@@ -27,7 +47,6 @@ export function SplitDivider<S>({ valueNow, style, measure, resize, reset, onDra
       event.currentTarget.setPointerCapture(event.pointerId);
       onDragging?.(true);
     }}
-    onPointerMove={event => { const current = drag.current; if (current?.pointer === event.pointerId) resize(event.clientX - current.x, current.start); }}
     onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}
     onDoubleClick={reset}
     onKeyDown={event => {

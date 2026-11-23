@@ -15,6 +15,8 @@ const paths = {
   X: <path d="m6 6 12 12M18 6 6 18"/>,
   ChevronUp: <path d="m6 15 6-6 6 6"/>,
   ChevronDown: <path d="m6 9 6 6 6-6"/>,
+  ChartColumn: <path d="M4 19h16M7 16v-4m5 4V8m5 8V4"/>,
+  TriangleAlert: <><path d="M10.3 4.8 2.6 18.2A1.9 1.9 0 0 0 4.2 21h15.6a1.9 1.9 0 0 0 1.6-2.8L13.7 4.8a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></>,
   Pin: <><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></>,
 } satisfies Record<string, ReactNode>;
 

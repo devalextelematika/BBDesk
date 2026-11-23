@@ -50,25 +50,48 @@ function validId(value: unknown): value is string {
 
 export const appWorkspaceId = "";
 const appSplitStorageKey = "bb-dashboard:app-split-layout:v1";
-export type AppSplitLayout = { appIds: string[]; order: string[]; sizes: Record<string, number> };
-export const emptyAppSplit = (): AppSplitLayout => ({ appIds: [], order: [], sizes: {} });
+export type AppSplitLayout = { appIds: string[]; order: string[]; sizes: Record<string, number>; activeAppId: string };
+export const emptyAppSplit = (): AppSplitLayout => ({ appIds: [], order: [], sizes: {}, activeAppId: "" });
 
 export function readAppSplit(): AppSplitLayout {
   return readStored(appSplitStorageKey, raw => {
     const row = raw as Partial<AppSplitLayout> | null;
     if (!Array.isArray(row?.appIds)) return emptyAppSplit();
     const appIds = [...new Set(row.appIds.filter(validId))].slice(0, 100);
-    const ids = new Set([appWorkspaceId, ...appIds]);
+    const ids = new Set([appWorkspaceId, "__accordion", ...appIds]);
     const order = Array.isArray(row.order) ? [...new Set(row.order.filter(id => ids.has(id)))] : [];
     const sizes = Object.fromEntries(Array.from(ids).flatMap(id => {
       const size = row.sizes?.[id];
       return typeof size === "number" && Number.isFinite(size) && size > 0 ? [[id, size]] : [];
     }));
-    return { appIds, order, sizes };
+    const activeAppId = typeof row.activeAppId === "string" && appIds.includes(row.activeAppId) ? row.activeAppId : appIds.at(-1) ?? "";
+    return { appIds, order, sizes, activeAppId };
   }, emptyAppSplit());
 }
 
 export function saveAppSplit(layout: AppSplitLayout) { writeStored(appSplitStorageKey, layout); }
+
+export function openAppLayout(layout: AppSplitLayout, id: string): AppSplitLayout {
+  return layout.appIds.includes(id)
+    ? { ...layout, activeAppId: id }
+    : { ...layout, appIds: [...layout.appIds, id], activeAppId: id };
+}
+
+export function closeAppLayout(layout: AppSplitLayout, id: string): AppSplitLayout {
+  if (!layout.appIds.includes(id)) return layout;
+  const sizes = { ...layout.sizes };
+  delete sizes[id];
+  const appIds = layout.appIds.filter(app => app !== id);
+  const closedIndex = layout.appIds.indexOf(id);
+  const activeAppId = layout.activeAppId === id
+    ? appIds[Math.min(closedIndex, appIds.length - 1)] ?? ""
+    : appIds.includes(layout.activeAppId) ? layout.activeAppId : appIds.at(-1) ?? "";
+  return { appIds, order: layout.order.filter(app => app !== id), sizes, activeAppId };
+}
+
+export function selectAppLayout(layout: AppSplitLayout, id: string): AppSplitLayout {
+  return layout.appIds.includes(id) ? { ...layout, activeAppId: id } : layout;
+}
 
 export function readThreadDrag(transfer: { getData(type: string): string }): PoolEntry | null {
   try {

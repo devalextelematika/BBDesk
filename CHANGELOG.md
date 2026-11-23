@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.12 — 2026-11-23
+
+- Add a provider quota dock to the application panel, with summaries, per-provider details, refresh status and a browser-local visibility setting. It reads data from BB's provider usage plugin when available.
+- Add an accordion layout for applications alongside chat, with a resizable divider and a browser-local choice between BB split, BBDesk columns and accordion.
+- Allow explicitly hiding failed conversations, including matching background threads, until new activity needs attention. Do not mark failures as successful completions.
+- Improve application column resizing, including dragging across embedded frames.
+
+See the [v0.1.12 release notes](docs/releases/v0.1.12.md).
+
 ## 0.1.11 — 2026-11-19
 
 - Add optional background-thread rules in Catalog → More settings. Match new threads by case-insensitive title substrings, keep their activity in indicators, and show project tabs when an error or input request needs attention. Successfully completed matches disappear automatically; original BB threads remain available.

@@ -33,8 +33,10 @@ export function matchesBackground(t: Pick<Activity, "displayTitle" | "createdAt"
 }
 export function backgroundState(t: Activity, previous?: TrackedThread, rules?: BackgroundRules) {
   const matched = !!rules?.enabled && (previous?.backgroundMatched === true || matchesBackground(t, rules));
-  const exposed = matched && (t.hasPendingInteraction || hasThreadFailure(t) || previous?.backgroundExposed === true && hasWork(t));
-  return { matched, exposed };
+  const dismissed = previous?.visible === false && previous.hiddenAttentionAt > 0
+    && t.latestAttentionAt <= previous.hiddenAttentionAt && !hasWork(t);
+  const exposed = matched && !dismissed && (t.hasPendingInteraction || hasThreadFailure(t) || previous?.backgroundExposed === true && hasWork(t));
+  return { matched, exposed, dismissed };
 }
 /** Explicit adapters for the two public SDK activity shapes. */
 export function sidebarActivity(t: Activity & { activity: { backgroundAgents: number; backgroundCommands: number; workflows: number } }): Activity {
@@ -53,7 +55,7 @@ export function isWorking(t: Activity): boolean {
     || (t.workflows ?? 0) > 0;
 }
 export function hasWork(t: Activity): boolean {
-  return isWorking(t) || t.queuedWork !== "none" || t.hasPendingInteraction;
+  return isWorking(t) || t.queuedWork === "waiting" || t.hasPendingInteraction;
 }
 export function subagentOwnerId(t: Pick<Activity, "lifecycleOwnerThreadId" | "parentThreadId" | "originKind">): string | null {
   if (t.lifecycleOwnerThreadId) return t.lifecycleOwnerThreadId;

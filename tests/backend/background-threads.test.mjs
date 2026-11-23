@@ -3,6 +3,35 @@ import assert from 'node:assert/strict';
 import { activityTest, activityFixture } from '../helpers/activity.mjs';
 import { listRow, plugin } from '../helpers/backend.mjs';
 
+for (const background of [false, true]) {
+  activityTest(`explicit hide dismisses a failed queue across sync and reload (background=${background})`, async context => {
+    let row = listRow({ createdAt: 1100, displayTitle: 'Nightly worker', status: 'error', queuedWork: 'failed' });
+    const config = { projects: [{ id: 'p1', enabled: true, connectedAt: 1 }], launcher: [], sharedPool: true,
+      ...(background ? { backgroundThreads: { enabled: true, substrings: ['worker'], since: 1000 } } : {}) };
+    const f = await activityFixture(context, { rows: [row], config });
+    await f.tick();
+    assert.equal((await f.rpc('thread_hide', { threadId: 't1' })).hidden, true);
+    for (let i = 0; i < 2; i++) {
+      f.emit(); await f.tick(750);
+      assert.equal((await f.rpc('snapshot')).tracked[0].visible, false);
+    }
+    row = { ...row, latestAttentionAt: 300 };
+    f.setRows([row]); f.emit(); await f.tick(750);
+    assert.equal((await f.rpc('snapshot')).tracked[0].visible, true);
+    row = { ...row, status: 'active', queuedWork: 'none' };
+    f.setRows([row]);
+    await assert.rejects(f.rpc('thread_hide', { threadId: 't1' }), /DASHBOARD_THREAD_BUSY/);
+    row = { ...row, status: 'error', queuedWork: 'none' };
+    f.setRows([row]);
+    assert.equal((await f.rpc('thread_hide', { threadId: 't1' })).hidden, true);
+    await f.stop();
+    const reloaded = await f.host.harness.lifecycle.reload(plugin);
+    try {
+      assert.equal((await reloaded.harness.behavior.callRpc('snapshot', null)).tracked[0].visible, false);
+    } finally { await reloaded.harness.lifecycle.dispose(); }
+  });
+}
+
 activityTest('background policy persists across reload, exposes interactions and retries, and hides unread success', async context => {
   const f = await activityFixture(context, { rows: [] });
   const saved = await f.rpc('catalog_change', { type: 'background', enabled: true, substrings: ['worker'] });

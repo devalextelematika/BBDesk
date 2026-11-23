@@ -4,10 +4,11 @@ import type { DashboardConfig } from "../contracts";
 import type { Translator } from "../i18n";
 import { dropAfter } from "../dom-utils";
 import { Icon } from "./ui/icon";
+import type { ApplicationMode } from "../hooks/use-app-split";
 
 /** The configured applications in the left panel, reorderable by dragging. */
-export function LauncherList({ entries, apps, internalSplit, tr, onOpen, onOpenAlongside, onReorder }: {
-  entries: DashboardConfig["launcher"] | null; apps: readonly ExperimentalSidebarNavigationItem[]; internalSplit: boolean; tr: Translator;
+export function LauncherList({ entries, apps, applicationMode, tr, onOpen, onOpenAlongside, onReorder }: {
+  entries: DashboardConfig["launcher"] | null; apps: readonly ExperimentalSidebarNavigationItem[]; applicationMode: ApplicationMode; tr: Translator;
   onOpen: (id: string) => void; onOpenAlongside: (id: string, item: ExperimentalSidebarNavigationItem | undefined) => void;
   onReorder: (id: string, targetId: string, after: boolean) => void;
 }) {
@@ -44,7 +45,7 @@ export function LauncherList({ entries, apps, internalSplit, tr, onOpen, onOpenA
       <button type="button" className="db-launch-main" draggable={false} disabled={unavailable} title={unavailable ? tr("appUnavailableHelp") : entry.label} onClick={() => onOpen(entry.id)}>
         {item ? <NavigationIcon icon={item.icon} className="db-icon"/> : <Icon name="AppWindow" className="db-icon"/>}<span className="db-launch-label">{entry.label}{unavailable && <small>{tr("unavailable")}</small>}</span>
       </button>
-      <button type="button" className="db-launch-split" draggable={false} disabled={unavailable} title={internalSplit ? tr("openAlongside", { name: entry.label }) : tr("splitHelp")} aria-label={tr("openAlongside", { name: entry.label })}
+      <button type="button" className="db-launch-split" draggable={false} disabled={unavailable} title={applicationMode !== "native" ? tr("openAlongside", { name: entry.label }) : tr("splitHelp")} aria-label={tr("openAlongside", { name: entry.label })}
         onClick={() => onOpenAlongside(entry.id, item)}><Icon name="Columns2" className="db-icon"/></button>
     </div>;
   })}</div>;

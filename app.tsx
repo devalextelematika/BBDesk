@@ -12,6 +12,8 @@ import type { CatalogChange } from "./catalog-config";
 import { Icon } from "./components/ui/icon";
 import { ThreadIndicator } from "./components/thread-indicator";
 import { LauncherList } from "./components/launcher-list";
+import { ProviderUsageDock } from "./components/provider-usage-dock";
+import { readStored, writeStored } from "./browser-storage";
 import { ProjectTabs } from "./project-tabs";
 import { sharedPoolComposer, selectionFields } from "./workspace-transitions";
 import { useWorkspace } from "./hooks/use-workspace";
@@ -51,11 +53,18 @@ function ConnectionWarning() {
   }, [connected]);
   return !connected && visible ? <div className="db-warning" role="status">{tr("connectionWarning")}</div> : null;
 }
+const quotaVisibilityKey = "bb-dashboard:provider-usage-visible:v1";
+
 function DashboardPage() {
   const { t: tr, language, isLoading: languageLoading } = useTranslation();
   const launcherPanel = useLauncherPanel();
+  const [showQuotaDock, setShowQuotaDock] = useState(() => readStored(quotaVisibilityKey, raw => raw !== false, true));
+  function changeQuotaVisibility(next: boolean) {
+    setShowQuotaDock(next);
+    writeStored(quotaVisibilityKey, next);
+  }
   const appSplit = useAppSplit();
-  const { internalSplit } = appSplit;
+  const { internalSplit, applicationMode } = appSplit;
   const snapshot = useDashboardSnapshot();
   const { rpc, data, error, setError, report, refresh, applyConfig, mounted } = snapshot;
   const sdk = useSdk();
@@ -170,8 +179,11 @@ function DashboardPage() {
     if (!internalSplit || item?.action?.kind !== "open-plugin-panel") { navigation?.actions.activate(id, { target: "split" }); return; }
     const existing = launcherPanel.root.current?.querySelectorAll<HTMLIFrameElement>("iframe[data-bbdesk-app]");
     const pane = Array.from(existing ?? []).find(frame => frame.dataset.bbdeskApp === id);
-    if (pane) { pane.focus(); pane.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }
-    else appSplit.openApp(id);
+    if (pane) {
+      appSplit.setActiveApp(id);
+      pane.focus();
+      pane.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    } else appSplit.openApp(id);
     if (launcherPanel.overlayOpen) launcherPanel.close();
   }
   function openSettings() {
@@ -226,14 +238,16 @@ function DashboardPage() {
     <div className="db-layout" data-launcher-open={launcherPanel.open} data-launcher-overlay={launcherPanel.overlayOpen}>
       <div ref={launcherPanel.panel} id={launcherPanel.panelId} className="db-launcher-shell" inert={!launcherPanel.open} aria-hidden={!launcherPanel.open}>
       <aside className="db-launcher" aria-label={tr("appsPanel")}>
-        <LauncherList entries={data ? config!.launcher : null} apps={apps} internalSplit={internalSplit} tr={tr}
+        <LauncherList entries={data ? config!.launcher : null} apps={apps} applicationMode={applicationMode} tr={tr}
           onOpen={id => navigation?.actions.activate(id, { target: "current" })} onOpenAlongside={openAppAlongside}
           onReorder={(id, targetId, after) => reorder("app", id, targetId, after)}/>
+        {showQuotaDock && <ProviderUsageDock visible={launcherPanel.open} tr={tr} language={language}/>}
       </aside>
       <div className="db-launcher-resize" {...launcherPanel.resizeProps}/>
       </div>
       <div className="db-launcher-backdrop" aria-hidden="true" onClick={launcherPanel.close}/>
-      <ApplicationWorkspace panes={appPanes} order={appSplit.appSplit.order} weights={appSplit.appSplit.sizes}
+      <ApplicationWorkspace panes={appPanes} mode={applicationMode} activeAppId={appSplit.appSplit.activeAppId}
+        setActiveApp={appSplit.setActiveApp} order={appSplit.appSplit.order} weights={appSplit.appSplit.sizes}
         setOrder={appSplit.setOrder} setWeights={appSplit.setWeights} close={appSplit.closeApp}
         openInBB={id => { navigation?.actions.activate(id, { target: "split" }); appSplit.closeApp(id); }}>
       <main ref={mainRef} className="db-main" aria-label={tr("workspace")} data-compact-workspace={compactWorkspace}>
@@ -281,7 +295,8 @@ function DashboardPage() {
       </main>
       </ApplicationWorkspace>
     </div>
-    {settings && config && <Catalog internalSplit={internalSplit} onInternalSplit={appSplit.changeSplitMode} config={config} projects={live.projects} apps={apps} appsReady={!!navigation} projectsStatus={live.status}
+    {settings && config && <Catalog applicationMode={applicationMode} onApplicationMode={appSplit.changeApplicationMode} config={config} projects={live.projects} apps={apps} appsReady={!!navigation} projectsStatus={live.status}
+      showQuotaDock={showQuotaDock} onQuotaDockVisibility={changeQuotaVisibility}
       opener={settingsOpener} change={changeCatalog} onClose={() => setSettings(false)}/>}
   </div>;
 }

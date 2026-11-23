@@ -74,14 +74,14 @@ test("catalog includes additional settings and searches original app names", asy
 test("application split mode preserves the chat, reuses frames and restores host navigation", async () => {
   const slot = mount({ language: "en", connected: true, threads: [thread("a", "p1", "Alpha")], launcher: [item] });
   const chat = await slot.findByTestId("bb-thread-chat");
-  async function toggle() {
+  async function chooseMode(mode) {
     const dialog = await showCatalog(slot);
     fireEvent.click(within(dialog).getByRole("tab", { name: "More settings" }));
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Open applications in a BBDesk split" }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: mode }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
   }
   const open = slot.container.querySelector(".db-launch-split");
-  await toggle();
+  await chooseMode(/Columns/);
   fireEvent.click(open);
   const frame = slot.container.querySelector("iframe");
   assert.equal(frame?.title, item.label);
@@ -98,11 +98,55 @@ test("application split mode preserves the chat, reuses frames and restores host
   assert.equal(slot.container.querySelector("iframe"), frame);
   assert.equal(slot.container.querySelectorAll("iframe").length, 1);
   assert.equal(slot.getByTestId("bb-thread-chat"), chat);
-  await toggle();
+  await chooseMode(/BB split/);
   assert.equal(frame.isConnected, false);
   fireEvent.click(open);
   assert.equal(slot.navigation.inspection.sidebarNavigationCalls.at(-1).target, "split");
   assert.equal(slot.getByTestId("bb-thread-chat"), chat);
+});
+
+test("application accordion mode keeps one app open under vertical headers", async () => {
+  const logs = { ...item, id: "logs/home", pluginId: "logs", label: "Logs", action: { kind: "open-plugin-panel", panelId: "home", pluginId: "logs" } };
+  const slot = mount({ language: "en", connected: true, threads: [thread("a", "p1", "Alpha")], launcher: [item, logs], navigationItems: [item, logs] });
+  await slot.findByTestId("bb-thread-chat");
+  const dialog = await showCatalog(slot);
+  fireEvent.click(within(dialog).getByRole("tab", { name: "More settings" }));
+  fireEvent.click(within(dialog).getByRole("radio", { name: /Accordion/ }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+
+  const buttons = slot.container.querySelectorAll(".db-launch-split");
+  fireEvent.click(buttons[0]);
+  fireEvent.click(buttons[1]);
+
+  const headers = Array.from(slot.container.querySelectorAll(".db-app-accordion-header"));
+  assert.equal(headers.length, 2);
+  assert.equal(slot.container.querySelectorAll(".db-app-workspace[data-accordion] > .db-split-divider").length, 1);
+  const separator = slot.container.querySelector(".db-app-workspace[data-accordion] > .db-split-divider");
+  separator.setPointerCapture = () => {};
+  const workspace = slot.container.querySelector(".db-app-workspace[data-accordion]");
+  for (const column of workspace.querySelectorAll(":scope > .db-app-column, :scope > .db-app-accordion"))
+    column.getBoundingClientRect = () => ({ width: 500 });
+  const previous = window.PointerEvent;
+  window.PointerEvent = window.MouseEvent;
+  try {
+    fireEvent.pointerDown(separator, { button: 0, pointerId: 7, clientX: 500 });
+    fireEvent.pointerMove(separator, { pointerId: 7, clientX: 700 });
+    fireEvent.pointerUp(separator, { pointerId: 7 });
+  } finally { window.PointerEvent = previous; }
+  assert.equal(slot.container.querySelector(".db-app-column").style.flexGrow, "0.68");
+  assert.equal(slot.container.querySelectorAll(".db-app-accordion-body iframe").length, 2);
+  assert.equal(slot.container.querySelectorAll(".db-app-accordion-body:not([hidden]) iframe").length, 1);
+
+  fireEvent.click(headers[0]);
+  assert.equal(headers[0].getAttribute("aria-expanded"), "true");
+  assert.equal(headers[1].getAttribute("aria-expanded"), "false");
+  assert.equal(slot.container.querySelectorAll(".db-app-accordion-body:not([hidden]) iframe").length, 1);
+
+  const logsClose = Array.from(slot.container.querySelectorAll(".db-app-accordion-actions .db-icon-btn"))
+    .find(button => button.getAttribute("aria-label")?.includes("Logs"));
+  fireEvent.click(logsClose);
+  assert.equal(slot.container.querySelectorAll(".db-app-accordion-header").length, 0);
+  assert.equal(slot.container.querySelectorAll(".db-app-heading").length, 1);
 });
 
 test("internal application layout survives remount with its order and widths", async () => {
@@ -124,12 +168,20 @@ test("internal application layout survives remount with its order and widths", a
   assert.ok(restored);
   assert.equal(restored.style.order, appColumn.style.order);
   assert.equal(restored.style.flexGrow, appColumn.style.flexGrow);
+  const restoredWorkspace = restored.closest(".db-app-workspace");
+  const restoredChat = restoredWorkspace.querySelector('.db-app-column[data-column-id=""]');
+  assert.ok(Number(restoredChat.style.flexGrow) < 1);
+  const main = returned.getByRole("main");
   fireEvent.click(restored.querySelector(".db-app-heading button:last-child"));
+  assert.equal(restoredWorkspace.querySelectorAll(".db-app-column").length, 1);
+  assert.equal(restoredChat.style.flexGrow, "1");
+  assert.equal(returned.getByRole("main"), main);
   returned.lifecycle.unmount();
 
   const reopened = mount(options);
   await reopened.findByRole("button", { name: `Open ${item.label} alongside` });
   assert.equal(reopened.container.querySelector("iframe"), null);
+  assert.equal(reopened.container.querySelector('.db-app-column[data-column-id=""]').style.flexGrow, "1");
 });
 
 test("catalog unavailable saved applications can be disconnected", async () => {

@@ -4,6 +4,12 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
+## What's new in 0.1.12
+
+- **Provider quotas:** View usage summaries and provider details in the application panel. The dock can be hidden in Catalog → More settings and uses BB's provider usage plugin when available.
+- **Application layouts:** Choose BB's native split, BBDesk columns or an accordion next to chat in Catalog → More settings.
+- **Failed conversations:** Explicitly hide a failed conversation, including a matching background thread, until new activity needs attention.
+
 ## What's new in 0.1.11
 
 - **Background threads:** Configure title substrings under Catalog → More settings to show new matching threads in project tabs only when an error or input request needs attention.
@@ -69,7 +75,7 @@ Project navigation stays on one row. Projects, Common threads and Shared pool th
 
 ## Unified catalog
 
-One small settings button on the right of the top toolbar opens Catalog. **Projects** and **Applications** each provide a searchable compact list. Connected entries are green with a checked checkbox. Click the checkbox or its label to connect or disconnect immediately, without opening an entry or closing settings. **More settings** contains application split preferences and background-thread visibility.
+One small settings button on the right of the top toolbar opens Catalog. **Projects** and **Applications** each provide a searchable compact list. Connected entries are green with a checked checkbox. Click the checkbox or its label to connect or disconnect immediately, without opening an entry or closing settings. **More settings** contains application layout, provider quota dock and background-thread visibility preferences.
 
 For background threads, enable **Show background threads only when attention is needed** and enter title substrings, one per line. The list saves when you leave the field. Matching ignores case and applies to new threads in all connected projects after enabling. During work, matching threads appear in activity indicators without project tabs. Errors and requests for your input bring them into the project until successful completion, when they disappear automatically. The original threads remain in BB; disabling the setting keeps the list.
 
@@ -185,7 +191,7 @@ Existing RPC methods and whole-list replacement behavior remain available. See [
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-Version `0.1.11` is a patch update from `0.1.10`. See the [changelog](CHANGELOG.md) and [v0.1.11 release notes](docs/releases/v0.1.11.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.11`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
+Version `0.1.12` is a patch update from `0.1.11`. See the [changelog](CHANGELOG.md) and [v0.1.12 release notes](docs/releases/v0.1.12.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.12`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
 
 ## License
 

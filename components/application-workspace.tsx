@@ -7,6 +7,7 @@ import { Icon } from "./ui/icon";
 import { SplitDivider } from "./split-divider";
 import { dropAfter } from "../dom-utils";
 import { SmallButton } from "./workspace-button";
+import type { ApplicationMode } from "../hooks/use-app-split";
 
 type AppPane = { id: string; label: string; icon?: ExperimentalSidebarNavigationItem["icon"] };
 
@@ -49,8 +50,9 @@ function fitEmbeddedPanel(frame: HTMLIFrameElement) {
   doc.head.append(style);
 }
 
-export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeights, close, openInBB, children }: {
+export function ApplicationWorkspace({ panes, mode, activeAppId, setActiveApp, order, weights, setOrder, setWeights, close, openInBB, children }: {
   order: string[]; weights: Record<string, number>;
+  mode: ApplicationMode; activeAppId: string; setActiveApp: (id: string) => void;
   setOrder: (order: string[]) => void; setWeights: (weights: Record<string, number>) => void;
   panes: AppPane[]; close: (id: string) => void; openInBB: (id: string) => void; children: ReactNode;
 }) {
@@ -69,6 +71,8 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
     setOrder(next);
   }
   const weight = (id: string) => weights[id] ?? 1;
+  // Flexbox leaves space unallocated when the remaining grow factors sum to less than one.
+  const growScale = Math.min(1, ids.reduce((total, id) => total + weight(id), 0));
   const lastPane = panes.at(-1)?.id;
   useEffect(() => {
     if (lastPane) strip.current?.lastElementChild?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
@@ -77,7 +81,7 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
     return {
       "data-column-id": id,
       "data-app-drop": drop?.id === id ? drop.after ? "after" : "before" : undefined,
-      style: { order: ids.indexOf(id) * 2, flexGrow: weight(id) },
+      style: { order: ids.indexOf(id) * 2, flexGrow: weight(id) / growScale },
       onDragOver(event: React.DragEvent<HTMLElement>) {
         if (moving === null) return;
         event.preventDefault();
@@ -108,6 +112,79 @@ export function ApplicationWorkspace({ panes, order, weights, setOrder, setWeigh
     next[index - 1] = left + move; next[index] = right - move;
     const average = widths.reduce((a, b) => a + b, 0) / widths.length;
     setWeights(Object.fromEntries(ids.map((id, i) => [id, next[i]! / average])));
+  }
+  if (mode === "accordion" && panes.length > 1) {
+    const accordionIds = [...order.filter(id => panes.some(pane => pane.id === id)), ...panes.map(pane => pane.id).filter(id => !order.includes(id))];
+    const paneById = new Map(panes.map(pane => [pane.id, pane]));
+    const activeId = panes.some(pane => pane.id === activeAppId) ? activeAppId : panes[0]!.id;
+    const accordionWeightKey = "__accordion";
+    const leftWeight = weight(appWorkspaceId);
+    const rightWeight = weight(accordionWeightKey);
+    const accordionTotal = leftWeight + rightWeight;
+    function measureAccordion(): [number, number] {
+      const columns = strip.current?.querySelectorAll<HTMLElement>(":scope > .db-app-column, :scope > .db-app-accordion");
+      return [columns?.[0]?.getBoundingClientRect().width ?? 320, columns?.[1]?.getBoundingClientRect().width ?? 320];
+    }
+    function resizeAccordion(delta: number, widths: [number, number]) {
+      const left = widths[0];
+      const right = widths[1];
+      const move = Math.max(320 - left, Math.min(right - 320, delta));
+      const average = (left + right) / 2;
+      setWeights({
+        ...weights,
+        [appWorkspaceId]: (left + move) / average,
+        [accordionWeightKey]: (right - move) / average,
+      });
+    }
+    return <div ref={strip} className="db-app-workspace" data-accordion="true">
+      <div className="db-app-column" style={{ flexGrow: leftWeight / accordionTotal }}>{children}</div>
+      <SplitDivider
+        valueNow={Math.round(100 * leftWeight / accordionTotal)}
+        measure={measureAccordion}
+        resize={(delta, widths) => resizeAccordion(delta, widths)}
+        reset={() => { const widths = measureAccordion(); resizeAccordion((widths[1] - widths[0]) / 2, widths); }}
+        onDragging={dragging => {
+          if (!strip.current) return;
+          if (dragging) strip.current.dataset.resizing = "true"; else delete strip.current.dataset.resizing;
+        }}/>
+      <section className="db-app-accordion" aria-label={t("applicationModeAccordion")} style={{ flexGrow: rightWeight / accordionTotal }}>
+        {accordionIds.map(id => {
+          const pane = paneById.get(id);
+          if (!pane) return null;
+          const active = id === activeId;
+          return <div className="db-app-accordion-item" key={pane.id} data-active={active || undefined}>
+            <button type="button" className="db-app-accordion-header" aria-expanded={active}
+              aria-controls={`db-app-body-${pane.id}`} onClick={() => setActiveApp(pane.id)}
+              onKeyDown={event => {
+                if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const index = accordionIds.indexOf(pane.id);
+                const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? accordionIds.length - 1
+                  : Math.max(0, Math.min(accordionIds.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+                const nextId = accordionIds[nextIndex];
+                if (nextId) {
+                  setActiveApp(nextId);
+                  strip.current?.querySelector<HTMLButtonElement>(`[data-app-accordion-id="${nextId}"]`)?.focus();
+                }
+              }} data-app-accordion-id={pane.id}>
+              <span className="db-app-icon" aria-hidden="true">
+                {pane.icon ? <NavigationIcon icon={pane.icon} className="db-icon"/> : <Icon name="AppWindow" className="db-icon"/>}
+              </span>
+              <strong>{pane.label}</strong>
+              <Icon name="ChevronUp" className={active ? "db-icon db-app-accordion-open" : "db-icon db-app-accordion-closed"}/>
+            </button>
+            <div className="db-app-accordion-actions">
+              <SmallButton icon="Columns2" label={t("openBbSplit")} onClick={() => openInBB(pane.id)}/>
+              <SmallButton icon="X" label={t("closeSplit", { name: pane.label })} onClick={() => close(pane.id)}/>
+            </div>
+            <div id={`db-app-body-${pane.id}`} className="db-app-accordion-body" hidden={!active}>
+              <iframe title={pane.label} data-bbdesk-app={pane.id} src="/plugins/dashboard/home"
+                onLoad={event => fitEmbeddedPanel(event.currentTarget)}/>
+            </div>
+          </div>;
+        })}
+      </section>
+    </div>;
   }
   return <div ref={strip} className="db-app-workspace" data-split={panes.length > 0 || undefined} data-app-moving={moving !== null || undefined}>
     <div className="db-app-column" {...columnProps(appWorkspaceId)}>{children}</div>

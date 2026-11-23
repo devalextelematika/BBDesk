@@ -65,7 +65,8 @@ export function createWorkspaceModel({ threads, projects, config, tracked = [], 
   // The server keeps one tracking row per thread id (a Map keyed by id), so the snapshot has no duplicates.
   const trackedById = new Map(tracked.map(row => [row.id, row]));
   const backgroundById = new Map(threads.map(t => [t.id, backgroundState(sidebarActivity(t), trackedById.get(t.id), config?.backgroundThreads)]));
-  const available = (t: Thread) => visibleThread(t) && (!backgroundById.get(t.id)?.matched || hasWork(sidebarActivity(t)) || hasThreadFailure(t));
+  const available = (t: Thread) => visibleThread(t) && (!backgroundById.get(t.id)?.matched
+    || !backgroundById.get(t.id)?.dismissed && (hasWork(sidebarActivity(t)) || hasThreadFailure(t)));
   const inProject = (t: Thread) => !backgroundById.get(t.id)?.matched || backgroundById.get(t.id)?.exposed === true;
   const byId = firstById(threads);
   const threadsByProject = byProject(threads);
@@ -74,7 +75,7 @@ export function createWorkspaceModel({ threads, projects, config, tracked = [], 
   const allThreads = threads.filter(t => {
     if (!visibleThread(t) || !connectedById.has(t.projectId)) return false;
     const activity = sidebarActivity(t);
-    if (backgroundById.get(t.id)?.matched) return hasWork(activity) || hasThreadFailure(t);
+    if (backgroundById.get(t.id)?.matched) return !backgroundById.get(t.id)?.dismissed && (hasWork(activity) || hasThreadFailure(t));
     if (isSubagent(t)) return !isFinishedSubagent(activity);
 
     const tracking = trackedById.get(t.id);

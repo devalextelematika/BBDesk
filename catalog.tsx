@@ -5,11 +5,14 @@ import { useCatalogActions } from "./hooks/use-catalog-actions";
 import { useTranslation } from "./use-translation";
 import { catalogChangeSchema, type DashboardConfig } from "./contracts";
 import { trapTab } from "./dom-utils";
+import type { ApplicationMode } from "./hooks/use-app-split";
 
 const tabs = ["project", "app", "settings"] as const;
 type Props = {
-  internalSplit: boolean;
-  onInternalSplit: (value: boolean) => void;
+  applicationMode: ApplicationMode;
+  onApplicationMode: (value: ApplicationMode) => void;
+  showQuotaDock: boolean;
+  onQuotaDockVisibility: (visible: boolean) => void;
   config: DashboardConfig;
   projects: readonly { id: string; name: string; isPersonal: boolean }[];
   apps: readonly { id: string; label: string; isDisabled: boolean; isLoading: boolean }[];
@@ -87,10 +90,20 @@ export function Catalog(props: Props) {
           }}>{tr(kind === "settings" ? "extraSettings" : kind === "project" ? "projects" : "catalogApps")}</button>)}
       </div>
       <div className="db-catalog-browse" data-settings={filter === "settings" || undefined} role="tabpanel" id="db-catalog-panel" aria-labelledby={`db-catalog-tab-${filter}`}>
-        {filter === "settings" ? <div className="db-catalog-special"><label>
-          <input type="checkbox" checked={props.internalSplit} onChange={event => props.onInternalSplit(event.target.checked)}/>
-          {tr("internalSplitSetting")}
-        </label><p className="db-muted">{tr("internalSplitDescription")}</p>
+        {filter === "settings" ? <div className="db-catalog-special">
+        <fieldset className="db-app-mode-settings">
+          <legend>{tr("applicationModeSetting")}</legend>
+          <p className="db-muted">{tr("applicationModeDescription")}</p>
+          <div className="db-app-mode-options">
+            <label><input type="radio" name="db-app-mode" value="native" checked={props.applicationMode === "native"} onChange={() => props.onApplicationMode("native")}/><span><strong>{tr("applicationModeNative")}</strong><small>{tr("applicationModeNativeDescription")}</small></span></label>
+            <label><input type="radio" name="db-app-mode" value="split" checked={props.applicationMode === "split"} onChange={() => props.onApplicationMode("split")}/><span><strong>{tr("applicationModeSplit")}</strong><small>{tr("applicationModeSplitDescription")}</small></span></label>
+            <label><input type="radio" name="db-app-mode" value="accordion" checked={props.applicationMode === "accordion"} onChange={() => props.onApplicationMode("accordion")}/><span><strong>{tr("applicationModeAccordion")}</strong><small>{tr("applicationModeAccordionDescription")}</small></span></label>
+          </div>
+        </fieldset>
+        <label className="db-quota-setting">
+          <input type="checkbox" checked={props.showQuotaDock} onChange={event => props.onQuotaDockVisibility(event.target.checked)}/>
+          {tr("quotaShowSetting")}
+        </label>
         <div className="db-background-settings">
           <label><input type="checkbox" data-background-toggle checked={config.backgroundThreads?.enabled ?? false} disabled={busy}
             onChange={event => saveBackground(event.target.checked)}/>{tr("backgroundSetting")}</label>
