@@ -36,7 +36,7 @@ const snapshotSchema = z.object({
 export const usageRequest = {
   pluginId: "bb--provider-usage",
   method: "getUsage",
-  input: { force: false, machineIds: null, providerIds: [], maxAgeMs: 5 * 60_000 },
+  input: { force: false, machineIds: null, maxAgeMs: 5 * 60_000 },
   outputSchema: snapshotSchema,
 };
 

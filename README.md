@@ -4,6 +4,10 @@ Your BB projects, chats and applications in one workspace.
 
 BBDesk combines an application launcher, project tabs and live activity indicators. Embedded chat and new-thread creation use BB's native components.
 
+## What's new in 0.1.13
+
+- **Provider quota fix:** BBDesk can load quotas on an empty cache without opening BB's Provider Usage panel first.
+
 ## What's new in 0.1.12
 
 - **Provider quotas:** View usage summaries and provider details in the application panel. The dock can be hidden in Catalog → More settings and uses BB's provider usage plugin when available.
@@ -191,7 +195,7 @@ Existing RPC methods and whole-list replacement behavior remain available. See [
 
 Dependencies, generated `dist/`, archives and local verification reports are excluded from Git. See [publishing notes](docs/PUBLISHING.md) for release checks and authorization boundaries.
 
-Version `0.1.12` is a patch update from `0.1.11`. See the [changelog](CHANGELOG.md) and [v0.1.12 release notes](docs/releases/v0.1.12.md) for changes, verification and remaining acceptance checks. Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.12`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
+Version `0.1.13` is a patch update from `0.1.12`. See the [changelog](CHANGELOG.md) and [v0.1.13 release notes](docs/releases/v0.1.13.md). Once the tag is published, install this exact version with `bb plugin install git:https://github.com/devalextelematika/BBDesk.git@v0.1.13`. Installing from the default GitHub URL follows the published default branch. Existing release tags must not be moved.
 
 ## License
 

@@ -44,7 +44,16 @@ function useProviderUsage(visible: boolean) {
       const request = new AbortController();
       pending = request;
       try {
-        const data = await sdk.plugins.callRpc({ ...usageRequest, signal: request.signal });
+        const rpc = { ...usageRequest, signal: request.signal };
+        // An empty provider list reads the inventory and cache without collecting quotas.
+        const inventory = await sdk.plugins.callRpc({ ...rpc, input: { ...rpc.input, providerIds: [] } });
+        if (request.signal.aborted) return;
+        const providerIds = [...new Set(inventory.machines
+          .filter(machine => machine.status === "connected")
+          .flatMap(machine => machine.providers.map(provider => provider.providerId)))];
+        const data = providerIds.length > 0
+          ? await sdk.plugins.callRpc({ ...rpc, input: { ...rpc.input, providerIds } })
+          : inventory;
         if (request.signal.aborted) return;
         const partial = hasPartialUsage(data);
         const receivedAt = Date.now();

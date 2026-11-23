@@ -18,10 +18,11 @@ test("the launcher dock shows localized quota summaries, details and saved visib
       provider("claude-code", "Claude Code", [limit("Weekly · Sonnet", 95, resetAt(2900))]),
     ] },
     { id: "shared", displayName: "Shared machine", status: "connected", error: null, providers: [
-      provider("codex", "Codex", [limit("Weekly limit", 12, resetAt(5))]),
+      { ...provider("codex", "Codex", [limit("Weekly limit", 12, resetAt(5))]), id: "source:codex-account" },
     ] },
     { id: "offline", displayName: "Offline machine", status: "disconnected", error: null, providers: [
       provider("codex", "Codex", [limit("Weekly limit", 120, resetAt(5))]),
+      provider("cursor", "Cursor", []),
     ] },
   ] };
   const originalVisibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
@@ -29,7 +30,12 @@ test("the launcher dock shows localized quota summaries, details and saved visib
   const requests = [];
   const sdk = { plugins: { callRpc: args => {
     requests.push(args);
-    return Promise.resolve(args.outputSchema.parse(data));
+    return Promise.resolve(args.outputSchema.parse({ machines: data.machines.map(machine => ({
+      ...machine,
+      providers: machine.providers.map(provider => ({
+        ...provider, usage: args.input.providerIds.includes(provider.providerId) ? provider.usage : null,
+      })),
+    })) }));
   } } };
   try {
     const slot = mount({ language: "en", sdk });
@@ -40,6 +46,7 @@ test("the launcher dock shows localized quota summaries, details and saved visib
     assert.match(badges[0].title, /Weekly limit.*Local machine.*local@example\.test/);
     assert.equal(requests[0].pluginId, "bb--provider-usage");
     assert.equal(requests[0].input.force, false);
+    assert.deepEqual(requests.map(({ input }) => input.providerIds), [[], ["codex", "claude-code"]]);
     fireEvent.click(compact);
     const all = dock.getByRole("button", { name: "All", pressed: true });
     assert.equal(document.activeElement, all);

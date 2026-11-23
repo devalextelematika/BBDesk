@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.13
+
+- Fix provider quotas showing dashes on an empty cache. BBDesk discovers available providers on connected sources and requests their quotas explicitly.
+
+See the [v0.1.13 release notes](docs/releases/v0.1.13.md).
+
 ## 0.1.12 — 2026-11-23
 
 - Add a provider quota dock to the application panel, with summaries, per-provider details, refresh status and a browser-local visibility setting. It reads data from BB's provider usage plugin when available.
