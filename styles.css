@@ -106,13 +106,29 @@
 .db-quota-expanded { display:flex; flex-direction:column; min-height:0; }
 .db-quota-expanded[hidden] { display:none; }
 .db-quota-toggle, .db-quota-toolbar button { background:none; color:inherit; font:inherit; cursor:pointer; border:1px solid transparent; border-radius:5px; }
-.db-quota-toggle { display:flex; align-items:center; gap:6px; width:100%; min-width:0; height:34px; padding:0 1px; text-align:left; }
+.db-quota-toggle { display:flex; align-items:center; gap:6px; width:100%; min-width:0; min-height:26px; padding:3px 1px; text-align:left; }
 .db-quota-toggle:hover, .db-quota-toolbar button:hover { background:var(--accent); }
 .db-quota-toggle:focus-visible, .db-quota-toolbar button:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
 .db-quota-toggle > .db-quota-icon { color:var(--db-accent); }
 .db-quota-icon { display:inline-block; flex:none; width:12px; height:12px; }
 .db-quota-strip, .db-quota-select { display:flex; align-items:center; gap:5px; min-width:0; overflow-x:auto; scrollbar-width:none; }
-.db-quota-badge { display:inline-flex; flex:none; align-items:center; gap:2px; font-size:10px; font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.db-quota-strip { flex:1; gap:4px; }
+.db-quota-summary { display:grid; grid-template-columns:12px minmax(0,1fr); align-items:center; gap:6px; min-width:0; padding:5px 0; }
+.db-quota-strip .db-quota-summary { flex:1 0 31px; grid-template-columns:12px minmax(0,1fr); gap:3px; padding:0; }
+.db-quota-strip .db-quota-summary:not(:has(progress)) { flex:0 0 12px; grid-template-columns:12px; }
+.db-quota-strip .db-quota-summary-windows { gap:2px; }
+.db-quota-content > .db-quota-summary + .db-quota-summary { border-top:1px solid var(--db-soft-border); }
+.db-quota-summary-icon { display:flex; align-items:center; }
+.db-quota-summary-windows { display:grid; gap:4px; min-width:0; }
+.db-quota-content .db-quota-summary-windows { grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:6px; }
+.db-quota-content .db-quota-segment:last-child:nth-child(odd) { grid-column:1/-1; }
+.db-quota-segment { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px; align-items:baseline; font-size:10px; font-variant-numeric:tabular-nums; }
+.db-quota-segment-label { color:var(--muted-foreground); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.db-quota-countdown { justify-self:end; color:var(--muted-foreground); font-size:9px; white-space:nowrap; }
+.db-quota-segment progress { --db-quota-fill:#478cd8; }
+.db-quota-segment:nth-child(even) progress { --db-quota-fill:#3f4cc7; }
+[data-single="true"] > .db-quota-segment progress { --db-quota-fill:var(--db-accent); }
+.db-quota-segment[data-level="warning"] progress, .db-quota-segment[data-level="critical"] progress { --db-quota-fill:currentColor; color:inherit; }
 .db-quota-warning { display:inline-flex; flex:none; margin-inline-start:auto; color:var(--warning-text,#b66700); }
 .db-quota [data-level="warning"] { color:var(--warning-text,#b66700); }
 .db-quota [data-level="critical"] { color:var(--destructive-text,var(--destructive,#c93334)); }
@@ -125,11 +141,14 @@
 .db-quota-line { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; gap:3px 5px; padding:4px 0; font-size:11px; }
 .db-quota-line strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
 .db-quota-line span { font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.db-quota-line progress { appearance:none; grid-column:1/-1; width:100%; height:4px; border:0; border-radius:4px; background:var(--muted); color:var(--db-accent); }
-.db-quota-line progress::-webkit-progress-bar { background:transparent; }
-.db-quota-line progress::-webkit-progress-value { background:currentColor; border-radius:4px; }
-.db-quota-line progress::-moz-progress-bar { background:currentColor; border-radius:4px; }
-.db-quota-provider-name, .db-quota-manual { display:flex; align-items:center; gap:5px; padding:4px 0; font-size:11px; }
+.db-quota-line progress { color:var(--db-accent); }
+.db-quota-line progress[data-level="warning"] { color:var(--warning-text,#b66700); }
+.db-quota-line progress[data-level="critical"] { color:var(--destructive-text,var(--destructive,#c93334)); }
+.db-quota progress { appearance:none; grid-column:1/-1; width:100%; height:4px; border:0; border-radius:4px; background:var(--muted); }
+.db-quota progress::-webkit-progress-bar { background:transparent; }
+.db-quota progress::-webkit-progress-value { background:var(--db-quota-fill,currentColor); border-radius:4px; }
+.db-quota progress::-moz-progress-bar { background:var(--db-quota-fill,currentColor); border-radius:4px; }
+.db-quota-manual { display:flex; align-items:center; gap:5px; padding:4px 0; font-size:11px; }
 .db-quota-manual { justify-content:space-between; color:var(--muted-foreground); }
 .db-quota-manual strong { color:var(--foreground); white-space:nowrap; }
 .db-quota-source + .db-quota-source, .db-quota-window + .db-quota-window { border-top:1px solid var(--db-soft-border); margin-top:5px; padding-top:5px; }
@@ -137,9 +156,7 @@
 .db-quota-setting { margin-top:10px; }
 @container (max-width:185px) {
   .db-quota-toggle { gap:4px; }
-  .db-quota-strip, .db-quota-select { gap:3px; }
-  .db-quota-badge { gap:1px; }
-  .db-quota-badge .db-quota-icon { width:9px; height:9px; }
+  .db-quota-select { gap:3px; }
   .db-quota-select button { min-width:19px; }
 }
 .db-icon { width:16px; height:16px; flex-shrink:0; }

@@ -7,13 +7,20 @@ function provider(providerId, displayName, windows, fields = {}) {
     usage: { status: "ok", windows, ...fields } };
 }
 
-test("the launcher dock shows localized quota summaries, details and saved visibility", async () => {
+test("the launcher dock shows localized quota summaries, details and saved visibility", async context => {
   const minutes = 60_000;
+  context.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 10, 23, 12, 0) });
+  let tickCountdown;
+  const setInterval = window.setInterval.bind(window);
+  context.mock.method(window, "setInterval", (callback, delay, ...args) => {
+    if (delay === minutes) tickCountdown = callback;
+    return setInterval(callback, delay, ...args);
+  });
   const resetAt = value => new Date(Date.now() + value * minutes).toISOString();
   const limit = (label, usedPercent, resetsAt) => ({ label, usedPercent, resetsAt });
   const data = { machines: [
     { id: "host", displayName: "Local machine", status: "connected", error: null, providers: [
-      provider("codex", "Codex", [limit("Weekly limit", 100, resetAt(1500)), limit("Five-hour limit", 80, resetAt(90))],
+      provider("codex", "Codex", [limit("Weekly limit", 100, resetAt(1500)), limit("Five-hour limit", 80, resetAt(90)), limit("Daily limit", 24, resetAt(60))],
         { manualResetsAvailable: 0, accountEmail: "local@example.test" }),
       provider("claude-code", "Claude Code", [limit("Weekly · Sonnet", 95, resetAt(2900))]),
     ] },
@@ -40,20 +47,36 @@ test("the launcher dock shows localized quota summaries, details and saved visib
   try {
     const slot = mount({ language: "en", sdk });
     const dock = within(slot.getByRole("region", { name: "Provider quotas" }));
-    const compact = await dock.findByRole("button", { name: /Codex: 100% used.*Claude Code: 95% used/ });
-    const badges = [...compact.querySelectorAll("[data-level]")];
-    assert.deepEqual(badges.map(node => node.dataset.level), ["critical", "critical"]);
-    assert.match(badges[0].title, /Weekly limit.*Local machine.*local@example\.test/);
+    const compact = await dock.findByRole("button", { name: /Codex: 80% used.*Codex: 24% used.*Codex: 100% used.*Claude Code: 95% used/ });
+    const segments = [...compact.querySelectorAll(".db-quota-segment")];
+    assert.deepEqual(segments.map(node => node.dataset.level), ["warning", "critical", "critical"]);
+    assert.deepEqual(segments.map(node => node.querySelector("progress").value), [80, 100, 95]);
+    assert.equal(compact.textContent.trim(), "");
+    assert.deepEqual([...compact.querySelectorAll(".db-quota-summary")].map(node => node.querySelectorAll("progress").length), [2, 1, 0]);
+    assert.match(segments[1].title, /Weekly limit.*Local machine.*local@example\.test/);
+    assert.equal(segments[2].parentElement.dataset.single, "true");
     assert.equal(requests[0].pluginId, "bb--provider-usage");
     assert.equal(requests[0].input.force, false);
     assert.deepEqual(requests.map(({ input }) => input.providerIds), [[], ["codex", "claude-code"]]);
     fireEvent.click(compact);
     const all = dock.getByRole("button", { name: "All", pressed: true });
     assert.equal(document.activeElement, all);
-    assert.equal(dock.getAllByRole("progressbar").length, 2);
+    const overview = document.querySelector(".db-quota-content");
+    assert.doesNotMatch(overview.textContent, /Codex|Claude Code|%/);
+    assert.deepEqual([...overview.querySelectorAll(".db-quota-segment-label")].map(node => node.textContent), ["5 hr", "Day", "7 d", "7 d"]);
+    const countdowns = () => [...overview.querySelectorAll(".db-quota-countdown")].map(node => node.textContent);
+    assert.deepEqual(countdowns(), ["1h 30m", "1h", "1d 1h", "2d"]);
+    context.mock.timers.tick(minutes);
+    await act(async () => tickCountdown());
+    assert.deepEqual(countdowns(), ["1h 29m", "59m", "1d", "2d"]);
+    assert.equal(requests.length, 2);
+    context.mock.timers.setTime(Date.UTC(2026, 10, 23, 12, 0));
+    await act(async () => tickCountdown());
+    assert.equal(dock.getAllByRole("progressbar").length, 4);
     assert.equal(dock.getByRole("progressbar", { name: /Codex: 100% used.*local@example\.test/ }).value, 100);
     fireEvent.click(dock.getByRole("button", { name: "Claude Code" }));
     assert.ok(dock.getByText("Weekly limit · Sonnet"));
+    assert.equal(dock.queryByText("Claude Code"), null);
     fireEvent.click(dock.getByRole("button", { name: "Codex" }));
     assert.ok(dock.getByText("0 available"));
     assert.ok(dock.getByText(/^Resets in 1 day 1 hr/));
@@ -65,7 +88,7 @@ test("the launcher dock shows localized quota summaries, details and saved visib
     assert.ok(dock.getByText("Недельный лимит · Sonnet"));
     assert.equal(dock.queryByText("Ручные сбросы"), null);
     fireEvent.click(dock.getByRole("button", { name: "Все" }));
-    assert.equal(dock.getAllByRole("progressbar").length, 2);
+    assert.equal(dock.getAllByRole("progressbar").length, 4);
     slot.lifecycle.unmount();
 
     const reloaded = mount({ language: "ru", sdk });
@@ -102,6 +125,7 @@ test("full and partial refresh errors mark retained quotas until a healthy respo
   const slot = mount({ language: "en", sdk });
   const dock = within(slot.getByRole("region", { name: "Provider quotas" }));
   const compact = () => dock.getByRole("button", { name: /^Expand provider quotas/ });
+  const values = () => [...compact().querySelectorAll("progress")].map(node => node.value);
   const warning = () => compact().querySelector(".db-quota-warning");
   const update = () => act(async () => document.dispatchEvent(new window.Event("visibilitychange")));
   await dock.findByRole("button", { name: /Codex: 9% used.*Claude Code: 82% used/ });
@@ -111,8 +135,9 @@ test("full and partial refresh errors mark retained quotas until a healthy respo
   next = null;
   await update();
   assert.match(warning().title, /Could not refresh quotas.*Last successful update/);
-  assert.match(compact().textContent, /9%82%/);
+  assert.deepEqual(values(), [9, 82]);
   fireEvent.click(compact());
+  assert.deepEqual([...document.querySelectorAll(".db-quota-content .db-quota-countdown")].map(node => node.textContent), ["—", "—"]);
   const lastUpdate = dock.getByText(/^Last successful update:/).textContent;
   const initialTime = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" })
     .format(Date.UTC(2026, 10, 23, 12, 0));
@@ -124,13 +149,72 @@ test("full and partial refresh errors mark retained quotas until a healthy respo
   await update();
   assert.match(warning().title, /Some quotas could not be refreshed/);
   assert.ok(warning().title.includes(lastUpdate));
-  assert.match(compact().textContent, /47%82%/);
+  assert.deepEqual(values(), [47, 82]);
 
   next = report(50, claude(21));
   await update();
   assert.equal(warning(), null);
-  assert.match(compact().textContent, /50%21%/);
+  assert.deepEqual(values(), [50, 21]);
   assert.doesNotMatch(compact().getAttribute("aria-label"), /Last successful update/);
+});
+
+test("quota refresh and cache age follow the highest connected usage", async context => {
+  const minute = 60_000;
+  let visibility = "visible";
+  context.mock.getter(Object.getPrototypeOf(document), "visibilityState", () => visibility);
+  const timers = new Map();
+  let timerId = -1;
+  const originalSetTimeout = window.setTimeout.bind(window);
+  const originalClearTimeout = window.clearTimeout.bind(window);
+  context.mock.method(window, "setTimeout", (callback, delay, ...args) => {
+    if (delay < minute) return originalSetTimeout(callback, delay, ...args);
+    const id = timerId--;
+    timers.set(id, { callback, delay });
+    return id;
+  });
+  context.mock.method(window, "clearTimeout", id => {
+    if (!timers.delete(id)) originalClearTimeout(id);
+  });
+  const changeVisibility = value => act(async () => {
+    visibility = value;
+    document.dispatchEvent(new window.Event("visibilitychange"));
+  });
+  let usedPercent = 79;
+  const requests = [];
+  const sdk = { plugins: { callRpc: async ({ input, outputSchema }) => {
+    if (input.providerIds.length) requests.push(input.maxAgeMs);
+    return outputSchema.parse({ machines: [
+      { id: "host", displayName: "Local", status: "connected", error: null, providers: [
+        provider("codex", "Codex", [{ label: "Weekly limit", usedPercent, resetsAt: null }]),
+      ] },
+      { id: "offline", displayName: "Offline", status: "disconnected", error: null, providers: [
+        provider("codex", "Codex", [{ label: "Weekly limit", usedPercent: 100, resetsAt: null }]),
+      ] },
+    ] });
+  } } };
+  const slot = mount({ language: "en", sdk });
+  await slot.findByRole("button", { name: /Codex: 79% used/ });
+  const delays = () => Array.from(timers.values(), timer => timer.delay);
+  assert.deepEqual(delays(), [5 * minute]);
+
+  for (const [usage, nextMinutes] of [[80, 3], [90, 1], [45, 5]]) {
+    const [[id, { callback, delay }]] = timers;
+    timers.delete(id);
+    usedPercent = usage;
+    await act(async () => callback());
+    assert.equal(requests.at(-1), delay);
+    assert.deepEqual(delays(), [nextMinutes * minute]);
+  }
+
+  await changeVisibility("hidden");
+  assert.deepEqual(delays(), []);
+  assert.deepEqual(requests, [5, 5, 3, 1].map(value => value * minute));
+  await changeVisibility("visible");
+  assert.equal(requests.at(-1), 5 * minute);
+  assert.equal(requests.length, 5);
+  assert.deepEqual(delays(), [5 * minute]);
+  slot.lifecycle.unmount();
+  assert.deepEqual(delays(), []);
 });
 
 test("an unavailable usage RPC leaves the applications panel usable", async context => {

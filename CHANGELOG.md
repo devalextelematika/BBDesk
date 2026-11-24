@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.14
+
+- Show separate quota periods with reset countdowns and compact provider indicators.
+- Refresh quotas every five, three or one minute according to the highest reported usage.
+
+See the [v0.1.14 release notes](docs/releases/v0.1.14.md).
+
 ## 0.1.13
 
 - Fix provider quotas showing dashes on an empty cache. BBDesk discovers available providers on connected sources and requests their quotas explicitly.

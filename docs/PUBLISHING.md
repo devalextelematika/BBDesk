@@ -68,7 +68,7 @@ The SDK DOM harness verifies component behavior and mounted node identity, not B
 
 ## Release identity and authorization
 
-The package and lockfile identify **0.1.13**, a patch update from **0.1.12**. Release notes are in [releases/v0.1.13.md](releases/v0.1.13.md). Before publishing, recheck remote state and confirm that the intended tag is unused. Do not recreate or move an existing tag.
+The package and lockfile identify **0.1.14**, a patch update from **0.1.13**. Release notes are in [releases/v0.1.14.md](releases/v0.1.14.md). Before publishing, recheck remote state and confirm that the intended tag is unused. Do not recreate or move an existing tag.
 
 Publication requires an explicit owner instruction. Source verification alone does not authorize commits, pushes, tags, GitHub Releases, archive uploads or npm publication. At the authorized publication step, review the final source, commit it and use a new, unused version tag on that tested commit.
 

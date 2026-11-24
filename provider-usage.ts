@@ -33,10 +33,12 @@ const snapshotSchema = z.object({
   })),
 });
 
+export const minute = 60_000;
+
 export const usageRequest = {
   pluginId: "bb--provider-usage",
   method: "getUsage",
-  input: { force: false, machineIds: null, maxAgeMs: 5 * 60_000 },
+  input: { force: false, machineIds: null, maxAgeMs: 5 * minute },
   outputSchema: snapshotSchema,
 };
 
@@ -80,15 +82,53 @@ export function resetTimestamp(window: UsageWindow): number {
   return window.resetsAt ? Date.parse(window.resetsAt) : NaN;
 }
 
-export function summaryWindow(provider: UsageProvider) {
-  let summary: { source: UsageSource; window: UsageWindow } | undefined;
+function* reportedWindows(provider: UsageProvider) {
   for (const source of provider.sources) {
     if (source.status !== "connected" || source.usage?.status !== "ok") continue;
     for (const window of source.usage.windows ?? []) {
-      if (!summary || window.usedPercent > summary.window.usedPercent) summary = { source, window };
+      yield { source, window };
     }
   }
+}
+
+export function summaryWindow(provider: UsageProvider) {
+  let summary: { source: UsageSource; window: UsageWindow } | undefined;
+  for (const entry of reportedWindows(provider)) {
+    if (!summary || entry.window.usedPercent > summary.window.usedPercent) summary = entry;
+  }
   return summary;
+}
+
+const quotaPeriods = ["five-hour", "daily", "weekly", "monthly"];
+
+export function quotaWindowKind(label: string) {
+  return label.split("·", 1)[0].trim().toLowerCase();
+}
+
+export function summaryWindows(provider: UsageProvider) {
+  const periods = new Map<string, { source: UsageSource; window: UsageWindow }>();
+  for (const entry of reportedWindows(provider)) {
+    const kind = quotaWindowKind(entry.window.label);
+    const period = kind.replace(/ limit$/, "");
+    const key = quotaPeriods.includes(period) ? period : entry.window.label.trim().toLowerCase();
+    const previous = periods.get(key);
+    if (!previous || entry.window.usedPercent > previous.window.usedPercent) periods.set(key, entry);
+  }
+  const order = (key: string) => {
+    const index = quotaPeriods.indexOf(key);
+    return index < 0 ? quotaPeriods.length : index;
+  };
+  return [...periods].sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b));
+}
+
+export function usageRefreshInterval(snapshot: UsageSnapshot | null) {
+  let highestUsage = 0;
+  for (const provider of groupProviderUsage(snapshot)) {
+    highestUsage = Math.max(highestUsage, summaryWindow(provider)?.window.usedPercent ?? 0);
+  }
+  if (highestUsage >= 90) return minute;
+  if (highestUsage >= 80) return 3 * minute;
+  return usageRequest.input.maxAgeMs;
 }
 
 export function hasPartialUsage(snapshot: UsageSnapshot) {

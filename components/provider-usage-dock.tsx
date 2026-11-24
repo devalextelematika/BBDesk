@@ -2,12 +2,11 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { experimental_ProviderIcon as ProviderIcon, useSdk } from "@get-bb/plugin-sdk/app";
 import { readStored, writeStored } from "../browser-storage";
 import type { Language, MessageKey, Translator } from "../i18n";
-import { groupProviderUsage, hasPartialUsage, quotaLevel, resetTimestamp, retainFailedUsage, summaryWindow,
-  usageRequest, usedPercent, type UsageProvider, type UsageSnapshot } from "../provider-usage";
+import { groupProviderUsage, hasPartialUsage, minute, quotaLevel, quotaWindowKind, resetTimestamp, retainFailedUsage, summaryWindows,
+  usageRefreshInterval, usageRequest, usedPercent, type UsageProvider, type UsageSnapshot } from "../provider-usage";
 import { Icon } from "./ui/icon";
 
 const openKey = "bb-dashboard:provider-usage-open:v1";
-const minute = 60_000;
 const windowLabels = new Map<string, MessageKey>([
   ["five-hour limit", "quotaFiveHours"],
   ["five-hour", "quotaFiveHours"],
@@ -21,15 +20,22 @@ const windowLabels = new Map<string, MessageKey>([
   ["chat messages", "quotaChatMessages"],
   ["code completions", "quotaCodeCompletions"],
 ]);
+const compactWindowLabels = new Map<MessageKey, MessageKey>([
+  ["quotaFiveHours", "quotaShortFiveHours"], ["quotaDaily", "quotaShortDaily"],
+  ["quotaWeekly", "quotaShortWeekly"], ["quotaMonthly", "quotaShortMonthly"],
+  ["quotaPlanUsage", "quotaShortPlan"], ["quotaChatMessages", "quotaShortChat"],
+  ["quotaCodeCompletions", "quotaShortCompletions"],
+]);
 
 function windowLabel(label: string, tr: Translator) {
-  const [kind = "", ...suffix] = label.split("·");
-  const key = windowLabels.get(kind.trim().toLowerCase());
+  const [, ...suffix] = label.split("·");
+  const key = windowLabels.get(quotaWindowKind(label));
   return key ? [tr(key), ...suffix.map(part => part.trim())].join(" · ") : label;
 }
 
 function useProviderUsage(visible: boolean) {
   const sdk = useSdk();
+  const latestSnapshot = useRef<UsageSnapshot | null>(null);
   const [result, setResult] = useState<{
     snapshot: UsageSnapshot | null; state: "loading" | "ready" | "partial" | "error"; lastSuccess: number | null;
   }>({ snapshot: null, state: "loading", lastSuccess: null });
@@ -45,31 +51,37 @@ function useProviderUsage(visible: boolean) {
       pending = request;
       try {
         const rpc = { ...usageRequest, signal: request.signal };
+        const input = { ...rpc.input, maxAgeMs: usageRefreshInterval(latestSnapshot.current) };
         // An empty provider list reads the inventory and cache without collecting quotas.
-        const inventory = await sdk.plugins.callRpc({ ...rpc, input: { ...rpc.input, providerIds: [] } });
+        const inventory = await sdk.plugins.callRpc({ ...rpc, input: { ...input, providerIds: [] } });
         if (request.signal.aborted) return;
         const providerIds = [...new Set(inventory.machines
           .filter(machine => machine.status === "connected")
           .flatMap(machine => machine.providers.map(provider => provider.providerId)))];
         const data = providerIds.length > 0
-          ? await sdk.plugins.callRpc({ ...rpc, input: { ...rpc.input, providerIds } })
+          ? await sdk.plugins.callRpc({ ...rpc, input: { ...input, providerIds } })
           : inventory;
         if (request.signal.aborted) return;
         const partial = hasPartialUsage(data);
+        const snapshot = partial ? retainFailedUsage(latestSnapshot.current, data) : data;
+        latestSnapshot.current = snapshot;
         const receivedAt = Date.now();
         setResult(previous => partial
-          ? { ...previous, snapshot: retainFailedUsage(previous.snapshot, data), state: "partial" }
-          : { snapshot: data, state: "ready", lastSuccess: receivedAt });
+          ? { ...previous, snapshot, state: "partial" }
+          : { snapshot, state: "ready", lastSuccess: receivedAt });
       } catch {
         if (!request.signal.aborted) setResult(previous => ({ ...previous, state: "error" }));
       } finally {
-        if (pending === request) pending = null;
+        if (pending === request) {
+          pending = null;
+          refreshTimer = window.setTimeout(refresh, usageRefreshInterval(latestSnapshot.current));
+        }
       }
     };
     const stop = () => {
       pending?.abort();
       pending = null;
-      window.clearInterval(refreshTimer);
+      window.clearTimeout(refreshTimer);
       window.clearInterval(clockTimer);
     };
     const visibilityChanged = () => {
@@ -78,7 +90,6 @@ function useProviderUsage(visible: boolean) {
       const tick = () => setNow(Date.now());
       tick();
       void refresh();
-      refreshTimer = window.setInterval(refresh, usageRequest.input.maxAgeMs);
       clockTimer = window.setInterval(tick, minute);
     };
     visibilityChanged();
@@ -96,26 +107,54 @@ function providerArtwork(provider: UsageProvider) {
     fallback={provider.id === "acp-gh-copilot" ? "Github" : undefined} className="db-quota-icon" aria-hidden/>;
 }
 
-function durationLabel(minutes: number, language: Language, tr: Translator) {
+function durationLabel(minutes: number, language: Language, tr: Translator, compact = false) {
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor(minutes % 1440 / 60);
   const remainder = minutes % 60;
+  if (compact) {
+    const format = (value: number, unit: string) => new Intl.NumberFormat(language, { style: "unit", unit, unitDisplay: "narrow" }).format(value);
+    if (days) return [format(days, "day"), hours ? format(hours, "hour") : ""].filter(Boolean).join(" ");
+    return [hours ? format(hours, "hour") : "", remainder || !hours ? format(remainder, "minute") : ""].filter(Boolean).join(" ");
+  }
   const format = new Intl.NumberFormat(language);
   function unit(key: MessageKey, count: number) { return tr(key, { count, value: format.format(count) }); }
   return [days ? unit("quotaDays", days) : "", hours ? unit("quotaHours", hours) : "",
     remainder ? unit("quotaMinutes", remainder) : ""].filter(Boolean).join(" ");
 }
 
-function QuotaLine({ label, value, percent, tr, description }: {
-  label: string; value?: number; percent: Intl.NumberFormat; tr: Translator; description?: string;
+function QuotaLine({ label, value, percent, tr }: {
+  label: string; value: number; percent: Intl.NumberFormat; tr: Translator;
 }) {
-  const displayed = value === undefined ? tr("quotaUnavailableValue") : percent.format(value / 100);
-  return <div className="db-quota-line" title={description}>
-    <strong title={description ?? label}>{label}</strong>
-    <span data-level={value === undefined ? undefined : quotaLevel(value)}>{displayed}</span>
-    {value !== undefined && <progress value={Math.min(100, value)} max={100} data-level={quotaLevel(value)}
-      aria-label={description ?? tr("quotaUsed", { name: label, percent: displayed })}/>}
+  const displayed = percent.format(value / 100);
+  const level = quotaLevel(value);
+  return <div className="db-quota-line" data-level={level}>
+    <strong title={label}>{label}</strong>
+    <span>{displayed}</span>
+    <progress value={Math.min(100, value)} max={100} aria-label={tr("quotaUsed", { name: label, percent: displayed })}/>
   </div>;
+}
+
+type QuotaSummary = { key: string; label: string; value: number; description: string; countdown: string };
+
+function QuotaSummaryRow({ provider, windows, tr, compact = false }: {
+  provider: UsageProvider; windows: QuotaSummary[]; tr: Translator; compact?: boolean;
+}) {
+  const strongest = compact && windows.length > 2 ? [...windows].sort((a, b) => b.value - a.value).slice(0, 2) : windows;
+  const visibleWindows = windows.filter(window => strongest.includes(window));
+  const tooltip = windows.length > 0 ? provider.displayName : tr("quotaProviderUnavailable", { name: provider.displayName });
+  return <span className="db-quota-summary">
+    <span className="db-quota-summary-icon" title={tooltip}>{providerArtwork(provider)}</span>
+    {visibleWindows.length > 0 ? <span className="db-quota-summary-windows" data-single={visibleWindows.length === 1}>
+      {visibleWindows.map(({ key, label, value, description, countdown }) => <span key={key} className="db-quota-segment"
+        data-level={quotaLevel(value)} title={description}>
+        {!compact && <>
+          <span className="db-quota-segment-label">{label}</span>
+          <span className="db-quota-countdown">{countdown}</span>
+        </>}
+        <progress value={Math.min(100, value)} max={100} aria-label={description}/>
+      </span>)}
+    </span> : !compact && <span className="db-quota-subtitle" title={tooltip}>{tr("quotaUnavailableValue")}</span>}
+  </span>;
 }
 
 function ProviderDetails({ provider, tr, language, now, percent }: {
@@ -125,7 +164,6 @@ function ProviderDetails({ provider, tr, language, now, percent }: {
   const numberFormat = new Intl.NumberFormat(language);
   const currency = new Intl.NumberFormat(language, { style: "currency", currency: "USD" });
   return <>
-    <div className="db-quota-provider-name">{providerArtwork(provider)}<strong>{provider.displayName}</strong></div>
     {provider.sources.map(source => {
       const usage = source.usage;
       const windows = usage?.windows ?? [];
@@ -178,17 +216,27 @@ export function ProviderUsageDock({ visible, tr, language }: { visible: boolean;
   const providers = useMemo(() => groupProviderUsage(snapshot), [snapshot]);
   const selected = providers.find(provider => provider.id === selectedId);
   const percent = useMemo(() => new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }), [language]);
-  const summaries = providers.map(provider => {
-    const summary = summaryWindow(provider);
-    if (!summary) return { provider, value: undefined, description: tr("quotaProviderUnavailable", { name: provider.displayName }) };
-    const { source, window } = summary;
+  const resetDate = useMemo(() => new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }), [language]);
+  const summaries = providers.map(provider => ({ provider, windows: summaryWindows(provider).map(([key, { source, window }]) => {
     const value = usedPercent(window);
-    return { provider, value, description: tr("quotaSummarySource", {
-      usage: tr("quotaUsed", { name: provider.displayName, percent: percent.format(value / 100) }),
+    const displayed = percent.format(value / 100);
+    const fullLabel = windowLabels.get(quotaWindowKind(window.label));
+    const shortLabel = fullLabel && compactWindowLabels.get(fullLabel);
+    const timestamp = resetTimestamp(window);
+    const minutes = Math.ceil((timestamp - now) / minute);
+    const knownReset = Number.isFinite(timestamp);
+    const countdown = knownReset ? durationLabel(Math.max(0, minutes), language, tr, true) : tr("quotaUnavailableValue");
+    const resetDescription = !knownReset ? tr("quotaResetUnknown")
+      : minutes > 0 ? tr("quotaResetsIn", { duration: durationLabel(minutes, language, tr), date: resetDate.format(timestamp) })
+      : tr("quotaResetAt", { date: resetDate.format(timestamp) });
+    const usageDescription = tr("quotaSummarySource", {
+      usage: tr("quotaUsed", { name: provider.displayName, percent: displayed }),
       window: windowLabel(window.label, tr),
       source: [source.machine, source.account].filter(Boolean).join(" · "),
-    }) };
-  });
+    });
+    return { key, label: shortLabel ? tr(shortLabel) : window.label, value, countdown,
+      description: `${usageDescription} · ${resetDescription}` };
+  }) }));
   const status = state === "loading" ? "loading" : state === "error" ? (snapshot ? "quotaStale" : "quotaLoadError")
     : state === "partial" ? "quotaPartial"
     : providers.length === 0 ? "quotaNoProviders" : null;
@@ -214,7 +262,8 @@ export function ProviderUsageDock({ visible, tr, language }: { visible: boolean;
     if (content.current) content.current.scrollTop = 0;
   }
 
-  const compactLabel = [tr("quotaExpand"), ...summaries.map(item => item.description),
+  const compactLabel = [tr("quotaExpand"), ...summaries.flatMap(({ provider, windows }) => windows.length > 0
+    ? windows.map(window => window.description) : tr("quotaProviderUnavailable", { name: provider.displayName })),
     status && tr(status), lastSuccessMessage].filter(Boolean).join(". ");
 
   return <section className="db-quota" aria-label={tr("quotaSection")} data-open={open}>
@@ -223,14 +272,17 @@ export function ProviderUsageDock({ visible, tr, language }: { visible: boolean;
         const list = strip.current;
         if (!list || list.scrollWidth <= list.clientWidth || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
         event.preventDefault();
-        list.scrollLeft += event.key === "ArrowLeft" ? -44 : 44;
+        const edge = list.getBoundingClientRect().left;
+        const limit = list.scrollWidth - list.clientWidth;
+        const positions = Array.from(list.children, child => Math.min(limit, child.getBoundingClientRect().left - edge + list.scrollLeft));
+        const next = event.key === "ArrowLeft"
+          ? positions.reverse().find(left => left < list.scrollLeft - 1)
+          : positions.find(left => left > list.scrollLeft + 1);
+        if (next !== undefined) list.scrollLeft = next;
       }}>
-      <Icon name="ChartColumn" className="db-quota-icon"/>
+      {providers.length === 0 && <Icon name="ChartColumn" className="db-quota-icon"/>}
       <span ref={strip} className="db-quota-strip" aria-hidden="true">
-        {summaries.map(({ provider, value, description }) => <span key={provider.id} className="db-quota-badge"
-          data-level={value === undefined ? undefined : quotaLevel(value)} title={description}>
-          {providerArtwork(provider)}{value === undefined ? tr("quotaUnavailableValue") : percent.format(value / 100)}
-        </span>)}
+        {summaries.map(({ provider, windows }) => <QuotaSummaryRow key={provider.id} provider={provider} windows={windows} tr={tr} compact/>)}
       </span>
       {warning && status && <span className="db-quota-warning" title={[tr(status), lastSuccessMessage].filter(Boolean).join(" ")} aria-hidden>
         <Icon name="TriangleAlert" className="db-quota-icon"/>
@@ -254,9 +306,7 @@ export function ProviderUsageDock({ visible, tr, language }: { visible: boolean;
         </div>
         <div ref={content} className="db-quota-content">
           {selected ? <ProviderDetails provider={selected} tr={tr} language={language} now={now} percent={percent}/>
-            : summaries.map(({ provider, value, description }) => <QuotaLine key={provider.id} label={provider.displayName} value={value}
-              percent={percent} tr={tr} description={description}/>)}
-          {!selected && summaries.some(item => item.value !== undefined) && <p className="db-quota-subtitle">{tr("quotaOverviewNote")}</p>}
+            : summaries.map(({ provider, windows }) => <QuotaSummaryRow key={provider.id} provider={provider} windows={windows} tr={tr}/>)}
           {status && <div role="status">
             <p className="db-quota-subtitle">{tr(status)}</p>
             {lastSuccessMessage && <p className="db-quota-subtitle">{lastSuccessMessage}</p>}
